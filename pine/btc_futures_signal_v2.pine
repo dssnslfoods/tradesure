@@ -1,0 +1,155 @@
+//@version=6
+indicator("BTC Futures BUY/SELL Webhook Alert v2", overlay=true, max_labels_count=500)
+
+// =====================================================
+// === Inputs
+// =====================================================
+grpCore   = "Core EMAs / RSI / ATR"
+fastEmaLength  = input.int(21,  "Fast EMA",  minval=1, group=grpCore)
+slowEmaLength  = input.int(55,  "Slow EMA",  minval=1, group=grpCore)
+trendEmaLength = input.int(200, "Trend EMA", minval=1, group=grpCore)
+rsiLength      = input.int(14,  "RSI Length", minval=1, group=grpCore)
+rsiLongMin     = input.float(52.0, "RSI min for LONG",  minval=0, maxval=100, group=grpCore)
+rsiLongMax     = input.float(75.0, "RSI max for LONG (avoid overbought)", minval=0, maxval=100, group=grpCore)
+rsiShortMax    = input.float(48.0, "RSI max for SHORT", minval=0, maxval=100, group=grpCore)
+rsiShortMin    = input.float(25.0, "RSI min for SHORT (avoid oversold)",  minval=0, maxval=100, group=grpCore)
+atrLength      = input.int(14,  "ATR Length", minval=1, group=grpCore)
+
+grpRisk   = "Risk Management"
+atrStopMult    = input.float(1.8, "Stop-loss ATR multiplier", minval=0.1, step=0.1, group=grpRisk)
+tp1Mult        = input.float(1.0, "TP1 reward (R multiple)",  minval=0.1, step=0.1, group=grpRisk)
+tp2Mult        = input.float(2.0, "TP2 reward (R multiple)",  minval=0.1, step=0.1, group=grpRisk)
+entryZoneAtrMult = input.float(0.15, "Entry zone half-width (ATR mult)", minval=0.0, step=0.05, group=grpRisk)
+
+grpFilter = "Quality Filters"
+adxLength      = input.int(14,   "ADX length", minval=1, group=grpFilter)
+adxMin         = input.float(17.0, "ADX minimum (trend strength)", minval=0, group=grpFilter)
+trendSlopeBars = input.int(10,   "Trend EMA slope lookback bars",  minval=1, group=grpFilter)
+volMaLength    = input.int(20,   "Volume MA length", minval=1, group=grpFilter)
+volMult        = input.float(1.0, "Volume must exceed MA × this",  minval=0.0, step=0.1, group=grpFilter)
+atrPctMin      = input.float(0.25, "Minimum ATR % of price (kills dead market)", minval=0, step=0.05, group=grpFilter)
+useHtfFilter   = input.bool(false, "Require 4H EMA50 trend alignment", group=grpFilter)
+htfTimeframe   = input.string("240", "Higher timeframe", options=["120","240","360","720","D"], group=grpFilter)
+htfEmaLen      = input.int(50,   "HTF EMA length", minval=1, group=grpFilter)
+cooldownBars   = input.int(3,    "Cooldown bars after a signal", minval=0, group=grpFilter)
+
+grpRun    = "Execution"
+useConfirmedBar = input.bool(true,  "Alert only after candle close", group=grpRun)
+enableLong      = input.bool(true,  "Enable LONG (BUY) alerts",  group=grpRun)
+enableShort     = input.bool(true,  "Enable SHORT (SELL) alerts", group=grpRun)
+testAlert       = input.bool(false, "Send TEST alert every candle close", group=grpRun)
+
+grpHook   = "Webhook"
+secret    = input.string("btc_ai_secret_2026_x7k29pQ", "Webhook secret",   group=grpHook)
+botName   = input.string("btc-futures-signal", "Bot/source name", group=grpHook)
+priceDecimals = input.int(2, "Price decimals in JSON", minval=0, maxval=8, group=grpHook)
+
+// =====================================================
+// === Calculations
+// =====================================================
+fastEma  = ta.ema(close, fastEmaLength)
+slowEma  = ta.ema(close, slowEmaLength)
+trendEma = ta.ema(close, trendEmaLength)
+rsi      = ta.rsi(close, rsiLength)
+atr      = ta.atr(atrLength)
+
+[diPlus, diMinus, adx] = ta.dmi(adxLength, adxLength)
+volMa = ta.sma(volume, volMaLength)
+
+// HTF trend (no repaint: lookahead_off + use confirmed HTF close)
+htfEma = request.security(syminfo.tickerid, htfTimeframe, ta.ema(close, htfEmaLen), lookahead=barmerge.lookahead_off)
+
+// Filters
+trendUp     = trendEma > trendEma[trendSlopeBars]
+trendDown   = trendEma < trendEma[trendSlopeBars]
+trendStrong = adx >= adxMin
+volOk       = volume > volMa * volMult
+atrOk       = (atr / close * 100.0) >= atrPctMin
+htfUp       = not useHtfFilter or close > htfEma
+htfDown     = not useHtfFilter or close < htfEma
+
+barReady = useConfirmedBar ? barstate.isconfirmed : true
+
+// Cooldown
+var int lastSignalBar = na
+canSignal = na(lastSignalBar) or (bar_index - lastSignalBar) >= cooldownBars
+
+// Raw triggers
+rawLong  = ta.crossover(fastEma, slowEma)  and close > trendEma and rsi >= rsiLongMin  and rsi <= rsiLongMax
+rawShort = ta.crossunder(fastEma, slowEma) and close < trendEma and rsi <= rsiShortMax and rsi >= rsiShortMin
+
+longSignal  = enableLong  and barReady and rawLong  and trendUp   and trendStrong and volOk and atrOk and htfUp   and canSignal
+shortSignal = enableShort and barReady and rawShort and trendDown and trendStrong and volOk and atrOk and htfDown and canSignal
+
+if longSignal or shortSignal
+    lastSignalBar := bar_index
+
+// =====================================================
+// === Trade levels (entry zone + 2 TPs)
+// =====================================================
+// LONG
+longEntryMid  = close
+longEntryLow  = close - atr * entryZoneAtrMult
+longEntryHigh = close + atr * entryZoneAtrMult
+longStop      = close - atr * atrStopMult
+longRiskAbs   = math.abs(longEntryMid - longStop)
+longTp1       = longEntryMid + longRiskAbs * tp1Mult
+longTp2       = longEntryMid + longRiskAbs * tp2Mult
+longRiskPct   = longRiskAbs / longEntryMid * 100.0
+
+// SHORT
+shortEntryMid  = close
+shortEntryLow  = close - atr * entryZoneAtrMult
+shortEntryHigh = close + atr * entryZoneAtrMult
+shortStop      = close + atr * atrStopMult
+shortRiskAbs   = math.abs(shortStop - shortEntryMid)
+shortTp1       = shortEntryMid - shortRiskAbs * tp1Mult
+shortTp2       = shortEntryMid - shortRiskAbs * tp2Mult
+shortRiskPct   = shortRiskAbs / shortEntryMid * 100.0
+
+// =====================================================
+// === Plot
+// =====================================================
+plot(fastEma,  "Fast EMA",  color=color.new(color.teal, 0),   linewidth=2)
+plot(slowEma,  "Slow EMA",  color=color.new(color.orange, 0), linewidth=2)
+plot(trendEma, "Trend EMA", color=color.new(color.gray, 0),   linewidth=2)
+plot(useHtfFilter ? htfEma : na, "HTF EMA", color=color.new(color.purple, 0), linewidth=1, style=plot.style_circles)
+
+plotshape(longSignal,  title="BUY",  style=shape.labelup,   location=location.belowbar, color=color.new(color.green, 0), text="BUY",  textcolor=color.white, size=size.small)
+plotshape(shortSignal, title="SELL", style=shape.labeldown, location=location.abovebar, color=color.new(color.red,   0), text="SELL", textcolor=color.white, size=size.small)
+
+// =====================================================
+// === JSON payload
+// =====================================================
+// Round to N decimals before stringifying — keeps JSON clean for the AI prompt
+fmt(float x) => str.tostring(math.round(x * math.pow(10, priceDecimals)) / math.pow(10, priceDecimals))
+
+makePayload(string sig, float eMid, float eLow, float eHigh, float sl, float tp1v, float tp2v, float rAbs, float rPct) =>
+    a = '{"secret":"' + secret + '","source":"' + botName + '","signal":"' + sig + '"'
+    b = ',"symbol":"' + syminfo.ticker + '","exchange":"' + syminfo.prefix + '","timeframe":"' + timeframe.period + '"'
+    c = ',"bar_time":' + str.tostring(time) + ',"price":' + fmt(close)
+    d = ',"entry":' + fmt(eMid) + ',"entry_low":' + fmt(eLow) + ',"entry_high":' + fmt(eHigh)
+    e = ',"stop_loss":' + fmt(sl) + ',"take_profit":' + fmt(tp1v) + ',"tp1":' + fmt(tp1v) + ',"tp2":' + fmt(tp2v) + ',"sl":' + fmt(sl)
+    f = ',"risk":' + fmt(rAbs) + ',"risk_percent":' + fmt(rPct) + ',"risk_reward_ratio":' + str.tostring(tp2Mult)
+    g = ',"rsi":' + fmt(rsi) + ',"adx":' + fmt(adx) + ',"atr":' + fmt(atr) + ',"atr_pct":' + fmt(atr / close * 100.0)
+    h = ',"fast_ema":' + fmt(fastEma) + ',"slow_ema":' + fmt(slowEma) + ',"trend_ema":' + fmt(trendEma) + ',"htf_ema":' + fmt(htfEma)
+    i = ',"volume":' + fmt(volume) + ',"volume_ma":' + fmt(volMa) + '}'
+    a + b + c + d + e + f + g + h + i
+
+if longSignal
+    alert(makePayload("BUY", longEntryMid, longEntryLow, longEntryHigh, longStop, longTp1, longTp2, longRiskAbs, longRiskPct), alert.freq_once_per_bar_close)
+
+if shortSignal
+    alert(makePayload("SELL", shortEntryMid, shortEntryLow, shortEntryHigh, shortStop, shortTp1, shortTp2, shortRiskAbs, shortRiskPct), alert.freq_once_per_bar_close)
+
+if testAlert and barstate.isconfirmed
+    testSl  = close - atr * atrStopMult
+    testTp1 = close + atr * atrStopMult * tp1Mult
+    testTp2 = close + atr * atrStopMult * tp2Mult
+    testEL  = close - atr * entryZoneAtrMult
+    testEH  = close + atr * entryZoneAtrMult
+    alert(makePayload("BUY", close, testEL, testEH, testSl, testTp1, testTp2, atr * atrStopMult, atr * atrStopMult / close * 100.0), alert.freq_once_per_bar_close)
+
+// Legacy alertcondition (manual JSON template) — keep for backward compatibility
+alertcondition(longSignal,  title="BTC Futures BUY",  message="BUY signal generated. Use Any alert() function call for JSON webhook payload.")
+alertcondition(shortSignal, title="BTC Futures SELL", message="SELL signal generated. Use Any alert() function call for JSON webhook payload.")
