@@ -17,8 +17,31 @@ export interface SignalRow {
   outcome: string | null;
   pnl_pct: number | null;
   bars_evaluated: number | null;
+  entry_low: number | null;
+  entry_high: number | null;
+  stop_loss_num: number | null;
+  take_profit_1_num: number | null;
+  take_profit_2_num: number | null;
   tv_signal: string | null;
   tv_price: number | null;
+}
+
+function entryMid(r: SignalRow): number | null {
+  if (r.entry_low !== null && r.entry_high !== null) {
+    return (r.entry_low + r.entry_high) / 2;
+  }
+  return r.tv_price;
+}
+
+function rrRatio(r: SignalRow): number | null {
+  const e = entryMid(r);
+  const sl = r.stop_loss_num;
+  const tp1 = r.take_profit_1_num;
+  if (e === null || sl === null || tp1 === null) return null;
+  const risk = Math.abs(e - sl);
+  const reward = Math.abs(tp1 - e);
+  if (risk === 0) return null;
+  return Math.round((reward / risk) * 100) / 100;
 }
 
 function biasBadge(bias: string | null) {
@@ -220,6 +243,11 @@ export default function SignalsTable({ rows }: { rows: SignalRow[] }) {
               <th className="px-4 py-3">AI Bias</th>
               <th className="px-4 py-3">Conf.</th>
               <th className="px-4 py-3">Risk</th>
+              <th className="px-4 py-3">Entry</th>
+              <th className="px-4 py-3 text-rose-300/70">SL</th>
+              <th className="px-4 py-3 text-emerald-300/70">TP1</th>
+              <th className="px-4 py-3 text-emerald-300/70">TP2</th>
+              <th className="px-4 py-3">R:R</th>
               <th className="px-4 py-3">Outcome</th>
               <th className="px-4 py-3">PnL</th>
               <th className="px-4 py-3">TG</th>
@@ -229,7 +257,7 @@ export default function SignalsTable({ rows }: { rows: SignalRow[] }) {
           <tbody className="divide-y divide-crypto-border">
             {rows.length === 0 && (
               <tr>
-                <td colSpan={13} className="px-4 py-12 text-center text-slate-500">
+                <td colSpan={18} className="px-4 py-12 text-center text-slate-500">
                   No signals yet. Send a test webhook to{" "}
                   <code className="text-emerald-300">/api/webhook/tradingview</code>.
                 </td>
@@ -277,6 +305,21 @@ export default function SignalsTable({ rows }: { rows: SignalRow[] }) {
                   </td>
                   <td className="whitespace-nowrap px-4 py-3">
                     <span className={riskBadge(r.risk_level)}>{r.risk_level ?? "-"}</span>
+                  </td>
+                  <td className="whitespace-nowrap px-4 py-3 tabular-nums text-slate-300">
+                    {fmtPrice(entryMid(r))}
+                  </td>
+                  <td className="whitespace-nowrap px-4 py-3 tabular-nums text-rose-300/90">
+                    {fmtPrice(r.stop_loss_num)}
+                  </td>
+                  <td className="whitespace-nowrap px-4 py-3 tabular-nums text-emerald-300/90">
+                    {fmtPrice(r.take_profit_1_num)}
+                  </td>
+                  <td className="whitespace-nowrap px-4 py-3 tabular-nums text-emerald-300/90">
+                    {fmtPrice(r.take_profit_2_num)}
+                  </td>
+                  <td className="whitespace-nowrap px-4 py-3 tabular-nums text-slate-300">
+                    {rrRatio(r) === null ? "-" : `${rrRatio(r)?.toFixed(2)}:1`}
                   </td>
                   <td className="whitespace-nowrap px-4 py-3">
                     <span className={outcomeBadge(r.outcome)}>

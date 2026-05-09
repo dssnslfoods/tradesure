@@ -21,6 +21,11 @@ interface Row {
   pnl_pct: number | null;
   outcome_at: string | null;
   bars_evaluated: number | null;
+  entry_low: number | null;
+  entry_high: number | null;
+  stop_loss_num: number | null;
+  take_profit_1_num: number | null;
+  take_profit_2_num: number | null;
   tradingview_signals: {
     signal: string;
     price: number | null;
@@ -42,6 +47,7 @@ async function loadRows(): Promise<Row[]> {
         `id, created_at, symbol, interval, bias, confidence, risk_level,
          telegram_sent, summary_th, signal_id,
          outcome, pnl_pct, outcome_at, bars_evaluated,
+         entry_low, entry_high, stop_loss_num, take_profit_1_num, take_profit_2_num,
          tradingview_signals:signal_id ( signal, price )`
       )
       .order("created_at", { ascending: false })
@@ -140,11 +146,22 @@ export default async function DashboardPage() {
         </div>
       </header>
 
-      <section className="mb-6 grid grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-6">
+      <section className="mb-6 grid grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-7">
         <StatCard label="Total" value={String(stats.total)} />
         <StatCard label="Wins" value={String(stats.wins)} accent="emerald" />
         <StatCard label="Losses" value={String(stats.losses)} accent="rose" />
         <StatCard label="Open" value={String(stats.open)} accent="sky" />
+        <StatCard
+          label="W:L Ratio"
+          value={
+            stats.losses === 0
+              ? stats.wins > 0
+                ? `${stats.wins}:0`
+                : "-"
+              : `${(stats.wins / stats.losses).toFixed(2)}:1`
+          }
+          accent={stats.wins > stats.losses ? "emerald" : "rose"}
+        />
         <StatCard
           label="Win rate"
           value={stats.winRate === null ? "-" : `${stats.winRate}%`}
@@ -171,6 +188,11 @@ export default async function DashboardPage() {
           outcome: r.outcome,
           pnl_pct: r.pnl_pct,
           bars_evaluated: r.bars_evaluated,
+          entry_low: r.entry_low,
+          entry_high: r.entry_high,
+          stop_loss_num: r.stop_loss_num,
+          take_profit_1_num: r.take_profit_1_num,
+          take_profit_2_num: r.take_profit_2_num,
           tv_signal: r.tradingview_signals?.signal ?? null,
           tv_price: r.tradingview_signals?.price ?? null,
         }))}
