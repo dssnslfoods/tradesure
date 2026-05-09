@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { getSupabaseAdmin } from "@/lib/supabase/server";
 import BacktestButton from "./BacktestButton";
+import SignalsTable, { type SignalRow } from "./SignalsTable";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -24,89 +25,6 @@ interface Row {
     signal: string;
     price: number | null;
   } | null;
-}
-
-function biasBadge(bias: string | null) {
-  const base = "rounded px-2 py-0.5 text-xs font-bold";
-  switch (bias) {
-    case "LONG":
-      return `${base} bg-emerald-500/20 text-emerald-300 border border-emerald-500/40`;
-    case "SHORT":
-      return `${base} bg-rose-500/20 text-rose-300 border border-rose-500/40`;
-    case "WAIT":
-      return `${base} bg-amber-500/20 text-amber-300 border border-amber-500/40`;
-    default:
-      return `${base} bg-slate-500/20 text-slate-300 border border-slate-500/40`;
-  }
-}
-
-function riskBadge(risk: string | null) {
-  const base = "rounded px-2 py-0.5 text-xs font-semibold";
-  switch (risk) {
-    case "Low":
-      return `${base} bg-emerald-500/15 text-emerald-300`;
-    case "Medium":
-      return `${base} bg-amber-500/15 text-amber-300`;
-    case "High":
-      return `${base} bg-rose-500/15 text-rose-300`;
-    default:
-      return `${base} bg-slate-500/15 text-slate-300`;
-  }
-}
-
-function signalBadge(signal: string) {
-  const base = "rounded px-2 py-0.5 text-xs font-semibold uppercase";
-  const s = signal.toUpperCase();
-  if (s.includes("BUY") || s.includes("LONG"))
-    return `${base} bg-emerald-500/20 text-emerald-300`;
-  if (s.includes("SELL") || s.includes("SHORT"))
-    return `${base} bg-rose-500/20 text-rose-300`;
-  return `${base} bg-slate-500/20 text-slate-300`;
-}
-
-function outcomeBadge(o: string | null) {
-  const base = "rounded px-2 py-0.5 text-xs font-bold whitespace-nowrap";
-  switch (o) {
-    case "WIN_TP1":
-      return `${base} bg-emerald-500/25 text-emerald-200 border border-emerald-500/40`;
-    case "WIN_TP2":
-      return `${base} bg-emerald-500/40 text-emerald-100 border border-emerald-500/60`;
-    case "LOSS_SL":
-      return `${base} bg-rose-500/25 text-rose-200 border border-rose-500/40`;
-    case "OPEN":
-      return `${base} bg-sky-500/20 text-sky-300 border border-sky-500/40`;
-    case "PENDING":
-      return `${base} bg-slate-500/20 text-slate-300 border border-slate-500/40`;
-    case "SKIP_WAIT":
-      return `${base} bg-amber-500/15 text-amber-300 border border-amber-500/40`;
-    case "NO_DATA":
-    case "ERROR":
-      return `${base} bg-zinc-500/20 text-zinc-300 border border-zinc-500/40`;
-    default:
-      return `${base} bg-slate-500/20 text-slate-300`;
-  }
-}
-
-function outcomeLabel(o: string | null): string {
-  if (!o) return "-";
-  if (o === "WIN_TP1") return "✅ TP1";
-  if (o === "WIN_TP2") return "✅✅ TP2";
-  if (o === "LOSS_SL") return "❌ SL";
-  if (o === "OPEN") return "⏳ OPEN";
-  if (o === "PENDING") return "🕒 Pending";
-  if (o === "SKIP_WAIT") return "⏭ Wait";
-  if (o === "NO_DATA") return "—";
-  return o;
-}
-
-function fmtPrice(v: number | null) {
-  if (v === null || v === undefined) return "-";
-  return v.toLocaleString("en-US", { maximumFractionDigits: 8 });
-}
-
-function fmtTime(iso: string) {
-  const d = new Date(iso);
-  return d.toLocaleString("en-GB", { hour12: false });
 }
 
 function fmtPnl(p: number | null) {
@@ -239,98 +157,24 @@ export default async function DashboardPage() {
         />
       </section>
 
-      <div className="overflow-hidden rounded-xl border border-crypto-border bg-crypto-panel shadow-lg">
-        <div className="overflow-x-auto">
-          <table className="min-w-full divide-y divide-crypto-border text-sm">
-            <thead className="bg-black/30 text-left text-xs uppercase tracking-wider text-slate-400">
-              <tr>
-                <th className="px-4 py-3">Time</th>
-                <th className="px-4 py-3">Symbol</th>
-                <th className="px-4 py-3">TF</th>
-                <th className="px-4 py-3">Signal</th>
-                <th className="px-4 py-3">Price</th>
-                <th className="px-4 py-3">AI Bias</th>
-                <th className="px-4 py-3">Conf.</th>
-                <th className="px-4 py-3">Risk</th>
-                <th className="px-4 py-3">Outcome</th>
-                <th className="px-4 py-3">PnL</th>
-                <th className="px-4 py-3">TG</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-crypto-border">
-              {rows.length === 0 && (
-                <tr>
-                  <td colSpan={11} className="px-4 py-12 text-center text-slate-500">
-                    No signals yet. Send a test webhook to{" "}
-                    <code className="text-emerald-300">/api/webhook/tradingview</code>.
-                  </td>
-                </tr>
-              )}
-              {rows.map((r) => (
-                <tr key={r.id} className="hover:bg-black/20">
-                  <td className="whitespace-nowrap px-4 py-3 text-slate-300">
-                    {fmtTime(r.created_at)}
-                  </td>
-                  <td className="whitespace-nowrap px-4 py-3 font-semibold text-slate-100">
-                    {r.symbol}
-                  </td>
-                  <td className="whitespace-nowrap px-4 py-3 text-slate-400">
-                    {r.interval}
-                  </td>
-                  <td className="whitespace-nowrap px-4 py-3">
-                    <span className={signalBadge(r.tradingview_signals?.signal ?? "-")}>
-                      {r.tradingview_signals?.signal ?? "-"}
-                    </span>
-                  </td>
-                  <td className="whitespace-nowrap px-4 py-3 tabular-nums text-slate-200">
-                    {fmtPrice(r.tradingview_signals?.price ?? null)}
-                  </td>
-                  <td className="whitespace-nowrap px-4 py-3">
-                    <span className={biasBadge(r.bias)}>{r.bias ?? "-"}</span>
-                  </td>
-                  <td className="whitespace-nowrap px-4 py-3 tabular-nums text-slate-200">
-                    {r.confidence ?? "-"}
-                    {r.confidence !== null ? "%" : ""}
-                  </td>
-                  <td className="whitespace-nowrap px-4 py-3">
-                    <span className={riskBadge(r.risk_level)}>{r.risk_level ?? "-"}</span>
-                  </td>
-                  <td className="whitespace-nowrap px-4 py-3">
-                    <span className={outcomeBadge(r.outcome)}>
-                      {outcomeLabel(r.outcome)}
-                    </span>
-                    {r.bars_evaluated ? (
-                      <span className="ml-2 text-[10px] text-slate-500">
-                        {r.bars_evaluated} bars
-                      </span>
-                    ) : null}
-                  </td>
-                  <td className="whitespace-nowrap px-4 py-3 tabular-nums">
-                    <span
-                      className={
-                        r.pnl_pct === null
-                          ? "text-slate-500"
-                          : r.pnl_pct >= 0
-                          ? "text-emerald-400"
-                          : "text-rose-400"
-                      }
-                    >
-                      {fmtPnl(r.pnl_pct)}
-                    </span>
-                  </td>
-                  <td className="whitespace-nowrap px-4 py-3">
-                    {r.telegram_sent ? (
-                      <span className="text-emerald-400">✓</span>
-                    ) : (
-                      <span className="text-rose-400">✗</span>
-                    )}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </div>
+      <SignalsTable
+        rows={rows.map<SignalRow>((r) => ({
+          id: r.id,
+          signal_id: r.signal_id,
+          created_at: r.created_at,
+          symbol: r.symbol,
+          interval: r.interval,
+          bias: r.bias,
+          confidence: r.confidence,
+          risk_level: r.risk_level,
+          telegram_sent: r.telegram_sent,
+          outcome: r.outcome,
+          pnl_pct: r.pnl_pct,
+          bars_evaluated: r.bars_evaluated,
+          tv_signal: r.tradingview_signals?.signal ?? null,
+          tv_price: r.tradingview_signals?.price ?? null,
+        }))}
+      />
 
       <p className="mt-4 text-xs text-slate-500">
         Backtest uses Binance public klines. First-touch model: if TP and SL are

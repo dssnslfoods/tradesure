@@ -2,6 +2,7 @@
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
+import { runBacktest } from "./actions";
 
 export default function BacktestButton() {
   const router = useRouter();
@@ -10,31 +11,23 @@ export default function BacktestButton() {
 
   const run = async (mode: "new" | "all") => {
     setStatus("Running…");
-    try {
-      const url = mode === "all" ? "/api/backtest/run?reeval=1&limit=500" : "/api/backtest/run?limit=500";
-      const res = await fetch(url, { method: "POST", cache: "no-store" });
-      const data = (await res.json()) as {
-        ok: boolean;
-        evaluated?: number;
-        win?: number;
-        loss?: number;
-        open?: number;
-        win_rate_pct?: number | null;
-        error?: string;
-      };
+    start(async () => {
+      const data = await runBacktest(mode);
       if (!data.ok) {
         setStatus(`Error: ${data.error ?? "unknown"}`);
         return;
       }
+      if (data.skipped) {
+        setStatus(`Skipped: ${data.reason ?? "schedule paused"}`);
+        return;
+      }
       setStatus(
-        `Evaluated ${data.evaluated} · ${data.win}W / ${data.loss}L / ${data.open}O · win-rate ${
+        `Evaluated ${data.evaluated ?? 0} · ${data.win ?? 0}W / ${data.loss ?? 0}L / ${data.open ?? 0}O · win-rate ${
           data.win_rate_pct ?? "-"
         }%`
       );
-      start(() => router.refresh());
-    } catch (err) {
-      setStatus(err instanceof Error ? err.message : "Network error");
-    }
+      router.refresh();
+    });
   };
 
   return (
