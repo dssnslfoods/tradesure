@@ -1,0 +1,54 @@
+# Firebase App Hosting config
+# Docs: https://firebase.google.com/docs/app-hosting/configure
+
+runConfig:
+  cpu: 1
+  memoryMiB: 512
+  maxInstances: 5
+  minInstances: 0
+  concurrency: 80
+
+env:
+  # ---- Public (safe to expose to the browser) ----
+  - variable: NEXT_PUBLIC_SUPABASE_URL
+    value: https://fnlpxfsxhafkbeyyiwla.supabase.co
+    availability:
+      - BUILD
+      - RUNTIME
+
+  - variable: NEXT_PUBLIC_SUPABASE_ANON_KEY
+    secret: SUPABASE_ANON_KEY
+    availability:
+      - BUILD
+      - RUNTIME
+
+  # ---- Server-only secrets (read from Google Secret Manager) ----
+  - variable: SUPABASE_SERVICE_ROLE_KEY
+    secret: SUPABASE_SERVICE_ROLE_KEY
+    availability:
+      - RUNTIME
+
+  - variable: OPENAI_API_KEY
+    secret: OPENAI_API_KEY
+    availability:
+      - RUNTIME
+
+  - variable: OPENAI_MODEL
+    value: gpt-4o-mini
+    availability:
+      - RUNTIME
+
+  - variable: TRADINGVIEW_WEBHOOK_SECRET
+    secret: TRADINGVIEW_WEBHOOK_SECRET
+    availability:
+      - RUNTIME
+
+  - variable: TELEGRAM_BOT_TOKEN
+    secret: TELEGRAM_BOT_TOKEN
+    availability:
+      - RUNTIME
+
+  - variable: TELEGRAM_CHAT_ID
+    secret: TELEGRAM_CHAT_ID
+    availability:
+      - RUNTIME

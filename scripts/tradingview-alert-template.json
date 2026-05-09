@@ -1,0 +1,14 @@
+{
+  "secret": "YOUR_SECRET_KEY",
+  "symbol": "{{ticker}}",
+  "exchange": "{{exchange}}",
+  "interval": "{{interval}}",
+  "price": "{{close}}",
+  "time": "{{timenow}}",
+  "signal": "{{strategy.order.action}}",
+  "strategy": "EMA_RSI_BTC",
+  "rsi": "{{plot_0}}",
+  "ema_fast": "{{plot_1}}",
+  "ema_slow": "{{plot_2}}",
+  "note": "BTC breakout signal"
+}
