@@ -4,6 +4,10 @@ import {
   evaluateSignal,
   SignalForEvaluation,
 } from "@/lib/backtest/evaluateSignal";
+import {
+  getScheduleConfig,
+  recordBacktestRun,
+} from "@/lib/schedule/settings";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -27,7 +31,7 @@ interface AnalysisJoinRow {
 
 function authorize(req: NextRequest): boolean {
   const expected = process.env.BACKTEST_CRON_SECRET;
-  if (!expected) return true; // dev-mode: allow if no secret set
+  if (!expected) return true; // dev: allow if not set
   const got =
     req.headers.get("x-cron-secret") ??
     req.nextUrl.searchParams.get("secret") ??
@@ -43,6 +47,7 @@ export async function POST(req: NextRequest) {
 }
 
 async function runBacktest(req: NextRequest) {
+  const startedAt = Date.now();
   if (!authorize(req)) {
     return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
   }
@@ -50,6 +55,23 @@ async function runBacktest(req: NextRequest) {
   const limitParam = Number(req.nextUrl.searchParams.get("limit") ?? 50);
   const limit = Number.isFinite(limitParam) ? Math.min(Math.max(limitParam, 1), 500) : 50;
   const reEval = req.nextUrl.searchParams.get("reeval") === "1";
+  const force = req.nextUrl.searchParams.get("force") === "1";
+  const triggerParam = req.nextUrl.searchParams.get("trigger");
+  const triggeredBy: "cron" | "manual" | "webhook" =
+    triggerParam === "manual" ? "manual"
+    : triggerParam === "webhook" ? "webhook"
+    : "cron";
+
+  // Honour pause flag — except when force=1 (manual button can override)
+  const cfg = await getScheduleConfig();
+  if (!cfg.enabled && !force) {
+    return NextResponse.json({
+      ok: true,
+      skipped: true,
+      reason: "schedule_paused",
+      paused_reason: cfg.paused_reason,
+    });
+  }
 
   const supabase = getSupabaseAdmin();
 
@@ -69,6 +91,10 @@ async function runBacktest(req: NextRequest) {
     .limit(limit);
 
   if (error) {
+    await safeLog({
+      triggered_by: triggeredBy, evaluated: 0, win: 0, loss: 0, open: 0, skipped: 0,
+      win_rate_pct: null, duration_ms: Date.now() - startedAt, error: error.message,
+    });
     return NextResponse.json(
       { ok: false, error: `Supabase query failed: ${error.message}` },
       { status: 500 }
@@ -130,15 +156,19 @@ async function runBacktest(req: NextRequest) {
     else if (evalResult.outcome === "OPEN") open++;
     else skipped++;
 
-    results.push({
-      id: row.id,
-      outcome: evalResult.outcome,
-      pnl_pct: evalResult.pnl_pct,
-    });
+    results.push({ id: row.id, outcome: evalResult.outcome, pnl_pct: evalResult.pnl_pct });
   }
 
   const decided = win + loss;
   const winRate = decided > 0 ? Math.round((win / decided) * 1000) / 10 : null;
+
+  await safeLog({
+    triggered_by: triggeredBy,
+    evaluated: rows.length, win, loss, open, skipped,
+    win_rate_pct: winRate,
+    duration_ms: Date.now() - startedAt,
+    error: null,
+  });
 
   return NextResponse.json({
     ok: true,
@@ -150,4 +180,12 @@ async function runBacktest(req: NextRequest) {
     win_rate_pct: winRate,
     results,
   });
+}
+
+async function safeLog(row: Parameters<typeof recordBacktestRun>[0]) {
+  try {
+    await recordBacktestRun(row);
+  } catch (e) {
+    console.error("recordBacktestRun failed", e);
+  }
 }

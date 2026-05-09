@@ -57,3 +57,9 @@ env:
     secret: BACKTEST_CRON_SECRET
     availability:
       - RUNTIME
+
+  - variable: NEXT_PUBLIC_SITE_URL
+    value: https://crypto-ai-signal--tradesure-800aa.asia-southeast1.hosted.app
+    availability:
+      - BUILD
+      - RUNTIME

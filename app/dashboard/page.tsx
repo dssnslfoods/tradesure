@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { getSupabaseAdmin } from "@/lib/supabase/server";
 import BacktestButton from "./BacktestButton";
 
@@ -210,7 +211,15 @@ export default async function DashboardPage() {
             Latest TradingView signals enriched with AI analysis and backtested against real market data.
           </p>
         </div>
-        <BacktestButton />
+        <div className="flex items-center gap-3">
+          <Link
+            href="/dashboard/schedule"
+            className="rounded-lg border border-crypto-border bg-crypto-panel px-4 py-2 text-sm font-semibold text-slate-200 hover:bg-black/30"
+          >
+            ⏰ Schedule
+          </Link>
+          <BacktestButton />
+        </div>
       </header>
 
       <section className="mb-6 grid grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-6">
