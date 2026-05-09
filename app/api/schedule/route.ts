@@ -52,7 +52,13 @@ export async function PATCH(req: NextRequest) {
   }
 
   const allowed: Partial<BacktestScheduleConfig> = {};
-  if (typeof body.enabled === "boolean") allowed.enabled = body.enabled;
+  if (typeof body.enabled === "boolean") {
+    allowed.enabled = body.enabled;
+    // Auto-clear paused_reason when enabling, unless caller explicitly sends one.
+    if (body.enabled && body.paused_reason === undefined) {
+      allowed.paused_reason = null;
+    }
+  }
   if (typeof body.interval_minutes === "number" && body.interval_minutes >= 1)
     allowed.interval_minutes = Math.round(body.interval_minutes);
   if (body.paused_reason === null || typeof body.paused_reason === "string")
