@@ -52,3 +52,8 @@ env:
     secret: TELEGRAM_CHAT_ID
     availability:
       - RUNTIME
+
+  - variable: BACKTEST_CRON_SECRET
+    secret: BACKTEST_CRON_SECRET
+    availability:
+      - RUNTIME

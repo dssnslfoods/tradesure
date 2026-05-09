@@ -103,14 +103,20 @@ export async function POST(req: NextRequest) {
       bias: aiResult.bias,
       confidence: aiResult.confidence,
       entry_zone: aiResult.entry_zone,
+      entry_low: aiResult.entry_low,
+      entry_high: aiResult.entry_high,
       stop_loss: aiResult.stop_loss,
+      stop_loss_num: aiResult.stop_loss_num,
       take_profit_1: aiResult.take_profit_1,
+      take_profit_1_num: aiResult.take_profit_1_num,
       take_profit_2: aiResult.take_profit_2,
+      take_profit_2_num: aiResult.take_profit_2_num,
       risk_level: aiResult.risk_level,
       summary_th: aiResult.summary_th,
       reasoning_th: aiResult.reasoning_th,
       telegram_sent: false,
       ai_raw_response: aiRaw,
+      outcome: aiResult.bias === "WAIT" ? "SKIP_WAIT" : "PENDING",
     })
     .select("id")
     .single();

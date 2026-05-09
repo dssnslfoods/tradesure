@@ -8,6 +8,10 @@ const SYSTEM_PROMPT = `คุณคือผู้ช่วยวิเครา
 - ระบุความเสี่ยงให้ชัดเจน
 - ใช้ข้อมูลจาก signal, ราคา, timeframe, RSI, EMA หากมี
 - หากข้อมูลไม่เพียงพอ ให้แนะนำ WAIT
+- ราคาเข้า / SL / TP ทุกตัวต้องเป็น "ตัวเลข" (numeric) เท่านั้น เพื่อให้ระบบ backtest ได้
+- entry_low ต้องน้อยกว่าหรือเท่ากับ entry_high
+- สำหรับ LONG: stop_loss_num < entry_low < take_profit_1_num < take_profit_2_num
+- สำหรับ SHORT: take_profit_2_num < take_profit_1_num < entry_high < stop_loss_num
 - เขียนกระชับ ชัดเจน อ่านง่ายบน Telegram
 - ตอบกลับเป็น JSON เท่านั้น ไม่ต้องอธิบายเพิ่ม`;
 
@@ -30,14 +34,21 @@ EMA Slow: ${p.ema_slow ?? "-"}
 {
   "bias": "LONG" | "SHORT" | "WAIT",
   "confidence": 0-100,
-  "entry_zone": "...",
-  "stop_loss": "...",
-  "take_profit_1": "...",
-  "take_profit_2": "...",
+  "entry_zone": "ข้อความบรรยาย เช่น 65000 - 65300",
+  "entry_low": ตัวเลขขอบล่างของโซนเข้า,
+  "entry_high": ตัวเลขขอบบนของโซนเข้า,
+  "stop_loss": "ข้อความบรรยาย",
+  "stop_loss_num": ตัวเลข SL,
+  "take_profit_1": "ข้อความบรรยาย",
+  "take_profit_1_num": ตัวเลข TP1,
+  "take_profit_2": "ข้อความบรรยาย",
+  "take_profit_2_num": ตัวเลข TP2,
   "risk_level": "Low" | "Medium" | "High",
   "summary_th": "สรุปสั้น ๆ 1-2 ประโยค",
   "reasoning_th": "เหตุผลประกอบสั้น ๆ"
-}`;
+}
+
+ถ้า bias = "WAIT" ให้ตั้ง entry_low, entry_high, stop_loss_num, take_profit_1_num, take_profit_2_num เป็น null ได้`;
 }
 
 function coerceBias(v: unknown): AIBias {
@@ -57,6 +68,12 @@ function coerceConfidence(v: unknown): number {
   const n = Number(v);
   if (!Number.isFinite(n)) return 0;
   return Math.max(0, Math.min(100, Math.round(n)));
+}
+
+function coerceNumeric(v: unknown): number | null {
+  if (v === null || v === undefined || v === "") return null;
+  const n = typeof v === "number" ? v : Number(String(v).replace(/[^\d.\-]/g, ""));
+  return Number.isFinite(n) ? n : null;
 }
 
 export async function analyzeCryptoSignal(
@@ -89,9 +106,14 @@ export async function analyzeCryptoSignal(
     bias: coerceBias(parsed.bias),
     confidence: coerceConfidence(parsed.confidence),
     entry_zone: String(parsed.entry_zone ?? "-"),
+    entry_low: coerceNumeric(parsed.entry_low),
+    entry_high: coerceNumeric(parsed.entry_high),
     stop_loss: String(parsed.stop_loss ?? "-"),
+    stop_loss_num: coerceNumeric(parsed.stop_loss_num),
     take_profit_1: String(parsed.take_profit_1 ?? "-"),
+    take_profit_1_num: coerceNumeric(parsed.take_profit_1_num),
     take_profit_2: String(parsed.take_profit_2 ?? "-"),
+    take_profit_2_num: coerceNumeric(parsed.take_profit_2_num),
     risk_level: coerceRisk(parsed.risk_level),
     summary_th: String(parsed.summary_th ?? "-"),
     reasoning_th: String(parsed.reasoning_th ?? "-"),

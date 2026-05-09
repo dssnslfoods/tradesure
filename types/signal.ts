@@ -21,13 +21,28 @@ export interface AIAnalysisResult {
   bias: AIBias;
   confidence: number;
   entry_zone: string;
+  entry_low: number | null;
+  entry_high: number | null;
   stop_loss: string;
+  stop_loss_num: number | null;
   take_profit_1: string;
+  take_profit_1_num: number | null;
   take_profit_2: string;
+  take_profit_2_num: number | null;
   risk_level: RiskLevel;
   summary_th: string;
   reasoning_th: string;
 }
+
+export type Outcome =
+  | "PENDING"
+  | "SKIP_WAIT"
+  | "WIN_TP1"
+  | "WIN_TP2"
+  | "LOSS_SL"
+  | "OPEN"
+  | "NO_DATA"
+  | "ERROR";
 
 export interface SignalRow {
   id: string;
