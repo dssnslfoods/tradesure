@@ -3,6 +3,7 @@
 import { useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { deleteSignal, deleteSignals } from "./actions";
+import EditLevelsModal from "./EditLevelsModal";
 
 export interface SignalRow {
   id: string;
@@ -98,7 +99,7 @@ const COLUMN_INFO: Record<
   },
   Actions: {
     full: "Actions",
-    desc: "ลบ signal นี้ออกถาวร (รวมถึงผล AI analysis)",
+    desc: "✏️ แก้ไข SL/TP levels (จะ reset outcome เป็น PENDING) · 🗑 ลบ signal ถาวร",
   },
 };
 
@@ -245,6 +246,7 @@ export default function SignalsTable({ rows }: { rows: SignalRow[] }) {
   const [pending, startTransition] = useTransition();
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [err, setErr] = useState<string | null>(null);
+  const [editing, setEditing] = useState<SignalRow | null>(null);
 
   const allIds = useMemo(() => rows.map((r) => r.signal_id), [rows]);
   const allSelected = selected.size > 0 && selected.size === allIds.length;
@@ -459,17 +461,28 @@ export default function SignalsTable({ rows }: { rows: SignalRow[] }) {
                     )}
                   </td>
                   <td className="whitespace-nowrap px-4 py-3 text-right">
-                    <button
-                      type="button"
-                      onClick={() =>
-                        onDeleteOne(r.signal_id, `${r.symbol} ${fmtTime(r.created_at)}`)
-                      }
-                      disabled={pending}
-                      className="rounded border border-rose-500/40 bg-rose-500/10 px-2 py-1 text-xs font-semibold text-rose-300 hover:bg-rose-500/20 disabled:opacity-40"
-                      title="Delete signal permanently"
-                    >
-                      🗑
-                    </button>
+                    <div className="inline-flex gap-1">
+                      <button
+                        type="button"
+                        onClick={() => setEditing(r)}
+                        disabled={pending}
+                        className="rounded border border-sky-500/40 bg-sky-500/10 px-2 py-1 text-xs font-semibold text-sky-300 hover:bg-sky-500/20 disabled:opacity-40"
+                        title="Edit SL/TP levels"
+                      >
+                        ✏️
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          onDeleteOne(r.signal_id, `${r.symbol} ${fmtTime(r.created_at)}`)
+                        }
+                        disabled={pending}
+                        className="rounded border border-rose-500/40 bg-rose-500/10 px-2 py-1 text-xs font-semibold text-rose-300 hover:bg-rose-500/20 disabled:opacity-40"
+                        title="Delete signal permanently"
+                      >
+                        🗑
+                      </button>
+                    </div>
                   </td>
                 </tr>
               );
@@ -477,6 +490,25 @@ export default function SignalsTable({ rows }: { rows: SignalRow[] }) {
           </tbody>
         </table>
       </div>
+
+      <EditLevelsModal
+        open={editing !== null}
+        onClose={() => setEditing(null)}
+        initial={
+          editing
+            ? {
+                analysisId: editing.id,
+                symbol: editing.symbol,
+                bias: editing.bias,
+                entry_low: editing.entry_low,
+                entry_high: editing.entry_high,
+                stop_loss_num: editing.stop_loss_num,
+                take_profit_1_num: editing.take_profit_1_num,
+                take_profit_2_num: editing.take_profit_2_num,
+              }
+            : null
+        }
+      />
     </div>
   );
 }
