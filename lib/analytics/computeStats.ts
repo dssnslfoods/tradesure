@@ -6,6 +6,7 @@ export interface AnalyticsRow {
   symbol: string;
   interval: string;
   bias: string | null;
+  confidence: number | null;
   outcome: string | null;
   pnl_pct: number | null;
   outcome_at: string | null;
@@ -83,6 +84,19 @@ export interface RollingPoint {
   winRate: number;
 }
 
+export interface ConfidenceBucket {
+  label: string;       // e.g. "70-80%"
+  min: number;         // inclusive
+  max: number;         // exclusive (except last bucket)
+  count: number;       // total trades in bucket (decided + open + skipped)
+  decided: number;     // trades with verdict (win/loss)
+  wins: number;
+  losses: number;
+  winRate: number | null;
+  avgPnl: number | null;
+  totalPnl: number;
+}
+
 export interface AllAnalytics {
   summary: SummaryStats;
   outcomes: OutcomeBreakdown;
@@ -92,6 +106,8 @@ export interface AllAnalytics {
   byInterval: { interval: string; count: number; winRate: number | null; totalPnl: number }[];
   byHour: HourlyStat[];
   rollingWinRate: RollingPoint[];
+  byConfidence: ConfidenceBucket[];
+  confidenceCorrelation: number | null;  // Pearson r between confidence and pnl_pct
 }
 
 const WIN_OUTCOMES = new Set(["WIN_TP1", "WIN_TP2"]);
@@ -344,6 +360,62 @@ export function computeAll(rows: AnalyticsRow[]): AllAnalytics {
     });
   }
 
+  // ----- By confidence bucket -----
+  const buckets: ConfidenceBucket[] = [
+    { label: "< 50%",  min: 0,   max: 50,  count: 0, decided: 0, wins: 0, losses: 0, winRate: null, avgPnl: null, totalPnl: 0 },
+    { label: "50-60%", min: 50,  max: 60,  count: 0, decided: 0, wins: 0, losses: 0, winRate: null, avgPnl: null, totalPnl: 0 },
+    { label: "60-70%", min: 60,  max: 70,  count: 0, decided: 0, wins: 0, losses: 0, winRate: null, avgPnl: null, totalPnl: 0 },
+    { label: "70-80%", min: 70,  max: 80,  count: 0, decided: 0, wins: 0, losses: 0, winRate: null, avgPnl: null, totalPnl: 0 },
+    { label: "80-90%", min: 80,  max: 90,  count: 0, decided: 0, wins: 0, losses: 0, winRate: null, avgPnl: null, totalPnl: 0 },
+    { label: "≥ 90%",  min: 90,  max: 101, count: 0, decided: 0, wins: 0, losses: 0, winRate: null, avgPnl: null, totalPnl: 0 },
+  ];
+
+  function bucketFor(c: number): ConfidenceBucket | null {
+    return buckets.find((b) => c >= b.min && c < b.max) ?? null;
+  }
+
+  // For Pearson correlation
+  const corrPairs: { conf: number; pnl: number }[] = [];
+
+  for (const r of sorted) {
+    if (r.confidence === null || !Number.isFinite(r.confidence)) continue;
+    const slot = bucketFor(r.confidence);
+    if (!slot) continue;
+    slot.count++;
+    if (TERMINAL_OUTCOMES.has(r.outcome ?? "") && typeof r.pnl_pct === "number") {
+      slot.decided++;
+      slot.totalPnl += r.pnl_pct;
+      if (WIN_OUTCOMES.has(r.outcome ?? "")) slot.wins++;
+      else if (LOSS_OUTCOMES.has(r.outcome ?? "")) slot.losses++;
+      corrPairs.push({ conf: r.confidence, pnl: r.pnl_pct });
+    }
+  }
+
+  buckets.forEach((b) => {
+    b.totalPnl = Math.round(b.totalPnl * 100) / 100;
+    b.winRate = b.decided === 0 ? null : Math.round((b.wins / b.decided) * 1000) / 10;
+    b.avgPnl = b.decided === 0 ? null : Math.round((b.totalPnl / b.decided) * 100) / 100;
+  });
+
+  // Pearson correlation between confidence and pnl_pct
+  let confidenceCorrelation: number | null = null;
+  if (corrPairs.length >= 3) {
+    const n = corrPairs.length;
+    const meanX = corrPairs.reduce((a, b) => a + b.conf, 0) / n;
+    const meanY = corrPairs.reduce((a, b) => a + b.pnl, 0) / n;
+    let num = 0, denX = 0, denY = 0;
+    for (const p of corrPairs) {
+      const dx = p.conf - meanX;
+      const dy = p.pnl - meanY;
+      num += dx * dy;
+      denX += dx * dx;
+      denY += dy * dy;
+    }
+    if (denX > 0 && denY > 0) {
+      confidenceCorrelation = Math.round((num / Math.sqrt(denX * denY)) * 1000) / 1000;
+    }
+  }
+
   return {
     summary,
     outcomes,
@@ -353,5 +425,7 @@ export function computeAll(rows: AnalyticsRow[]): AllAnalytics {
     byInterval,
     byHour: hourSlots,
     rollingWinRate: rolling,
+    byConfidence: buckets,
+    confidenceCorrelation,
   };
 }

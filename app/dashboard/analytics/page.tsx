@@ -13,6 +13,7 @@ import {
   TopSymbols,
   RollingWinRate,
   HourOfDayHeatmap,
+  ConfidenceVsWinRate,
 } from "./Charts";
 
 export const dynamic = "force-dynamic";
@@ -24,6 +25,7 @@ interface DbRow {
   symbol: string;
   interval: string;
   bias: string | null;
+  confidence: number | null;
   outcome: string | null;
   pnl_pct: number | null;
   outcome_at: string | null;
@@ -40,7 +42,7 @@ async function loadAll(): Promise<AnalyticsRow[]> {
     const { data, error } = await supabase
       .from("ai_signal_analysis")
       .select(
-        `id, created_at, symbol, interval, bias, outcome, pnl_pct, outcome_at,
+        `id, created_at, symbol, interval, bias, confidence, outcome, pnl_pct, outcome_at,
          stop_loss_num, take_profit_1_num, entry_low, entry_high,
          tradingview_signals:signal_id ( price )`
       )
@@ -54,6 +56,7 @@ async function loadAll(): Promise<AnalyticsRow[]> {
       symbol: r.symbol,
       interval: r.interval,
       bias: r.bias,
+      confidence: r.confidence,
       outcome: r.outcome,
       pnl_pct: r.pnl_pct,
       outcome_at: r.outcome_at,
@@ -193,6 +196,11 @@ export default async function AnalyticsPage() {
           <TopSymbols data={a.bySymbol} />
           <ByIntervalPanel data={a.byInterval} />
         </div>
+
+        <ConfidenceVsWinRate
+          buckets={a.byConfidence}
+          correlation={a.confidenceCorrelation}
+        />
 
         <HourOfDayHeatmap data={a.byHour} />
       </div>

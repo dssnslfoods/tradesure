@@ -2,6 +2,7 @@
 
 import type {
   AllAnalytics,
+  ConfidenceBucket,
   EquityPoint,
   DailyPoint,
   HourlyStat,
@@ -428,6 +429,222 @@ export function HourOfDayHeatmap({ data }: { data: HourlyStat[] }) {
         <span className="rounded bg-amber-500/40 px-1.5 py-0.5 text-amber-200">40-60%</span>
         <span className="rounded bg-rose-500/40 px-1.5 py-0.5 text-rose-200">&lt; 40%</span>
         <span className="ml-auto">Opacity = ความถี่ของ trade ในชั่วโมงนั้น</span>
+      </div>
+    </ChartFrame>
+  );
+}
+
+// ============================================================
+// Confidence vs Win rate combo chart
+// Bars = trade count per bucket; line + dots = win rate per bucket
+// ============================================================
+export function ConfidenceVsWinRate({
+  buckets,
+  correlation,
+}: {
+  buckets: ConfidenceBucket[];
+  correlation: number | null;
+}) {
+  const decidedBuckets = buckets.filter((b) => b.decided > 0);
+  if (decidedBuckets.length === 0) {
+    return <EmptyChart label="ยังไม่มี trade ที่มี confidence + outcome" />;
+  }
+
+  const W = 600;
+  const H = 280;
+  const PAD_L = 45;
+  const PAD_R = 50;
+  const PAD_T = 24;
+  const PAD_B = 50;
+  const innerW = W - PAD_L - PAD_R;
+  const innerH = H - PAD_T - PAD_B;
+
+  const maxCount = Math.max(...buckets.map((b) => b.decided)) || 1;
+  const slotW = innerW / buckets.length;
+  const barW = slotW * 0.55;
+
+  // Win-rate y-scale: 0..100
+  const wrY = (wr: number) => PAD_T + (1 - wr / 100) * innerH;
+  // Count y-scale: 0..maxCount
+  const cntY = (n: number) => PAD_T + (1 - n / maxCount) * innerH;
+
+  // Build line points for win-rate trend across buckets
+  const linePts = buckets
+    .filter((b) => b.winRate !== null)
+    .map((b) => {
+      const idx = buckets.indexOf(b);
+      const x = PAD_L + idx * slotW + slotW / 2;
+      return { x, y: wrY(b.winRate as number), bucket: b };
+    });
+
+  const linePath = linePts
+    .map((p, i) => `${i === 0 ? "M" : "L"} ${p.x.toFixed(1)} ${p.y.toFixed(1)}`)
+    .join(" ");
+
+  const corrText =
+    correlation === null
+      ? "—"
+      : `${correlation >= 0 ? "+" : ""}${correlation.toFixed(3)}`;
+  const corrLabel =
+    correlation === null
+      ? "ข้อมูลน้อยเกินไป"
+      : correlation >= 0.3
+      ? "📈 สูง — confidence สูง = กำไรสูง (สัญญาณดี)"
+      : correlation >= 0.1
+      ? "↗️ บวกอ่อน — confidence ช่วยได้บ้าง"
+      : correlation > -0.1
+      ? "↔️ ไม่มีความสัมพันธ์ชัด"
+      : correlation > -0.3
+      ? "↘️ ลบอ่อน — confidence สูงไม่ช่วย"
+      : "📉 ลบสูง — confidence ตรงข้ามกับผล (สัญญาณเสีย)";
+
+  return (
+    <ChartFrame
+      title="🎯 Confidence vs Win rate"
+      subtitle={`AI confidence buckets · correlation r = ${corrText}`}
+    >
+      <svg viewBox={`0 0 ${W} ${H}`} className="w-full">
+        {/* Y-axis grid lines (win rate) */}
+        {[0, 25, 50, 75, 100].map((wr) => (
+          <g key={wr}>
+            <line
+              x1={PAD_L}
+              x2={W - PAD_R}
+              y1={wrY(wr)}
+              y2={wrY(wr)}
+              stroke="rgba(148,163,184,0.1)"
+              strokeWidth={1}
+            />
+            <text x={W - PAD_R + 4} y={wrY(wr) + 3} fontSize="9" fill="#64748b">
+              {wr}%
+            </text>
+          </g>
+        ))}
+
+        {/* 50% reference */}
+        <line
+          x1={PAD_L}
+          x2={W - PAD_R}
+          y1={wrY(50)}
+          y2={wrY(50)}
+          stroke="rgba(251,191,36,0.4)"
+          strokeWidth={1}
+          strokeDasharray="4 4"
+        />
+
+        {/* Left axis: count labels */}
+        <text x={PAD_L - 5} y={PAD_T + 8} fontSize="9" fill="#64748b" textAnchor="end">
+          {maxCount}
+        </text>
+        <text x={PAD_L - 5} y={cntY(0) + 3} fontSize="9" fill="#64748b" textAnchor="end">
+          0
+        </text>
+
+        {/* Bars (trade count) */}
+        {buckets.map((b, i) => {
+          const x = PAD_L + i * slotW + (slotW - barW) / 2;
+          const y = cntY(b.decided);
+          const h = cntY(0) - y;
+          const positive = (b.winRate ?? 0) >= 50;
+          const fill =
+            b.decided === 0
+              ? "rgba(71,85,105,0.3)"
+              : positive
+              ? "rgba(52,211,153,0.4)"
+              : "rgba(248,113,113,0.4)";
+          return (
+            <g key={b.label}>
+              <rect x={x} y={y} width={barW} height={h} fill={fill} stroke="rgba(148,163,184,0.3)">
+                <title>
+                  {b.label}: {b.decided} trades, {b.wins}W/{b.losses}L
+                  {b.winRate !== null && ` · win rate ${b.winRate}%`}
+                  {b.avgPnl !== null && ` · avg ${b.avgPnl >= 0 ? "+" : ""}${b.avgPnl}%`}
+                </title>
+              </rect>
+              {/* count label on bar */}
+              {b.decided > 0 && (
+                <text
+                  x={x + barW / 2}
+                  y={y - 4}
+                  textAnchor="middle"
+                  fontSize="9"
+                  fill="#cbd5e1"
+                >
+                  {b.decided}
+                </text>
+              )}
+              {/* x label */}
+              <text
+                x={PAD_L + i * slotW + slotW / 2}
+                y={H - 28}
+                textAnchor="middle"
+                fontSize="10"
+                fill="#94a3b8"
+              >
+                {b.label}
+              </text>
+              {/* avg PnL below x-label */}
+              {b.avgPnl !== null && (
+                <text
+                  x={PAD_L + i * slotW + slotW / 2}
+                  y={H - 14}
+                  textAnchor="middle"
+                  fontSize="8"
+                  fill={b.avgPnl >= 0 ? "#34d399" : "#f87171"}
+                >
+                  {b.avgPnl >= 0 ? "+" : ""}
+                  {b.avgPnl}%
+                </text>
+              )}
+            </g>
+          );
+        })}
+
+        {/* Win-rate line */}
+        {linePts.length >= 2 && (
+          <path
+            d={linePath}
+            fill="none"
+            stroke="#38bdf8"
+            strokeWidth={2}
+            strokeLinejoin="round"
+          />
+        )}
+
+        {/* Win-rate dots */}
+        {linePts.map((p, i) => (
+          <circle key={i} cx={p.x} cy={p.y} r={4} fill="#38bdf8" stroke="#0f172a" strokeWidth={1.5}>
+            <title>
+              {p.bucket.label}: win rate {p.bucket.winRate}%
+            </title>
+          </circle>
+        ))}
+
+        {/* Right axis label */}
+        <text
+          x={W - 4}
+          y={PAD_T - 8}
+          textAnchor="end"
+          fontSize="9"
+          fill="#38bdf8"
+          fontWeight="bold"
+        >
+          Win rate %
+        </text>
+        {/* Left axis label */}
+        <text x={PAD_L} y={PAD_T - 8} fontSize="9" fill="#cbd5e1" fontWeight="bold">
+          Bars = trade count
+        </text>
+      </svg>
+
+      <div className="mt-3 rounded-md border border-crypto-border bg-black/30 p-3 text-xs">
+        <div className="font-semibold text-slate-300">Correlation: {corrText}</div>
+        <div className="mt-1 text-slate-400">{corrLabel}</div>
+        <div className="mt-2 text-[10px] text-slate-500">
+          ค่า Pearson correlation ระหว่าง AI confidence (0-100) กับ PnL (%) ของ trade ที่จบแล้ว.
+          ค่าใกล้ +1 = confidence สูงทำนายผลดีได้แม่น · ค่าใกล้ 0 = ไม่มีความสัมพันธ์ ·
+          ค่าติดลบ = AI ใช้ confidence ตรงกันข้ามกับผลจริง (ต้อง tune AI prompt)
+        </div>
       </div>
     </ChartFrame>
   );
