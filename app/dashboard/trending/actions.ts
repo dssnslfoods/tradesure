@@ -7,8 +7,8 @@ import { findUserById } from "@/lib/auth/otp";
 import { verifySessionToken, SESSION_COOKIE } from "@/lib/auth/session";
 import { analyzeCryptoSignal } from "@/lib/ai/analyzeCryptoSignal";
 import {
+  broadcastTelegramMessage,
   buildTelegramMessage,
-  sendTelegramMessage,
 } from "@/lib/telegram/sendTelegramMessage";
 import type { TradingViewPayload } from "@/types/signal";
 
@@ -166,9 +166,9 @@ export async function analyzeTrendingCoin(input: {
       .single();
     if (aErr || !analysisRow) throw new Error(aErr?.message ?? "insert analysis failed");
 
-    // Send Telegram (best-effort)
+    // Send Telegram (best-effort) — broadcast to all active users
     const message = buildTelegramMessage(payload, ai);
-    const tg = await sendTelegramMessage(message);
+    const tg = await broadcastTelegramMessage(message);
     if (tg.ok) {
       await supabase
         .from("ai_signal_analysis")

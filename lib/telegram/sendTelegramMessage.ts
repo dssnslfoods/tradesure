@@ -193,6 +193,58 @@ export async function sendTelegramToChat(
   }
 }
 
+// Broadcast a signal-style alert to every active auth_user's Telegram
+// chat plus the env TELEGRAM_CHAT_ID (which may be a shared channel or
+// the original admin chat). De-duplicates by chat_id so admins linked
+// to TELEGRAM_CHAT_ID don't get the same message twice.
+export async function broadcastTelegramMessage(message: string): Promise<{
+  ok: boolean;
+  sent: number;
+  failed: number;
+  errors: string[];
+}> {
+  const token = process.env.TELEGRAM_BOT_TOKEN;
+  const envChatId = process.env.TELEGRAM_CHAT_ID;
+  if (!token) {
+    return { ok: false, sent: 0, failed: 0, errors: ["Missing TELEGRAM_BOT_TOKEN"] };
+  }
+
+  const chatIds = new Set<string>();
+  if (envChatId) chatIds.add(envChatId);
+
+  // Pull active users from DB
+  try {
+    const { getSupabaseAdmin } = await import("@/lib/supabase/server");
+    const supabase = getSupabaseAdmin();
+    const { data: users } = await supabase
+      .from("auth_users")
+      .select("telegram_chat_id")
+      .eq("is_active", true);
+    (users ?? []).forEach((u: { telegram_chat_id: string | null }) => {
+      if (u.telegram_chat_id) chatIds.add(u.telegram_chat_id);
+    });
+  } catch {
+    // If DB lookup fails, fall back to env-only
+  }
+
+  if (chatIds.size === 0) {
+    return { ok: false, sent: 0, failed: 0, errors: ["No recipients configured"] };
+  }
+
+  const results = await Promise.all(
+    [...chatIds].map(async (cid) => {
+      const r = await sendTelegramToChat(cid, message);
+      return { chatId: cid, ...r };
+    })
+  );
+
+  const sent = results.filter((r) => r.ok).length;
+  const failed = results.length - sent;
+  const errors = results.filter((r) => !r.ok).map((r) => `${r.chatId}: ${r.error}`);
+
+  return { ok: sent > 0, sent, failed, errors };
+}
+
 export async function sendTelegramMessage(message: string): Promise<{
   ok: boolean;
   error?: string;

@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSupabaseAdmin } from "@/lib/supabase/server";
 import { getTrendingBuckets } from "@/lib/binance/topMovers";
-import { sendTelegramMessage } from "@/lib/telegram/sendTelegramMessage";
+import { broadcastTelegramMessage } from "@/lib/telegram/sendTelegramMessage";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -82,7 +82,7 @@ async function handle(req: NextRequest) {
         `ดูเพิ่มเติม: https://tradesure.d2infinite.com/dashboard/trending`
       );
 
-      const tg = await sendTelegramMessage(lines.join("\n"));
+      const tg = await broadcastTelegramMessage(lines.join("\n"));
       telegramSent = tg.ok;
     }
 

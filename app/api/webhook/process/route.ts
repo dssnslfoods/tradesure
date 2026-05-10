@@ -2,8 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { getSupabaseAdmin } from "@/lib/supabase/server";
 import { analyzeCryptoSignal } from "@/lib/ai/analyzeCryptoSignal";
 import {
+  broadcastTelegramMessage,
   buildTelegramMessage,
-  sendTelegramMessage,
 } from "@/lib/telegram/sendTelegramMessage";
 import type { TradingViewPayload } from "@/types/signal";
 
@@ -99,7 +99,7 @@ export async function POST(req: NextRequest) {
   const analysisId = analysisRow.id as string;
 
   const message = buildTelegramMessage(payload, aiResult);
-  const tg = await sendTelegramMessage(message);
+  const tg = await broadcastTelegramMessage(message);
 
   if (tg.ok) {
     await supabase
@@ -113,6 +113,8 @@ export async function POST(req: NextRequest) {
     signal_id: signalId,
     analysis_id: analysisId,
     telegram_sent: tg.ok,
-    telegram_error: tg.ok ? undefined : tg.error,
+    telegram_recipients: tg.sent,
+    telegram_failed: tg.failed,
+    telegram_errors: tg.errors.length > 0 ? tg.errors : undefined,
   });
 }
