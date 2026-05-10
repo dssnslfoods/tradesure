@@ -51,6 +51,40 @@ export function buildTelegramMessage(
   return lines.join("\n");
 }
 
+export async function sendTelegramToChat(
+  chatId: string,
+  message: string
+): Promise<{ ok: boolean; error?: string }> {
+  const token = process.env.TELEGRAM_BOT_TOKEN;
+  if (!token) return { ok: false, error: "Missing TELEGRAM_BOT_TOKEN" };
+  if (!chatId) return { ok: false, error: "Missing chat_id" };
+
+  try {
+    const res = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        chat_id: chatId,
+        text: message,
+        parse_mode: "HTML",
+        disable_web_page_preview: true,
+      }),
+    });
+
+    if (!res.ok) {
+      const text = await res.text().catch(() => "");
+      return { ok: false, error: `Telegram HTTP ${res.status}: ${text.slice(0, 300)}` };
+    }
+    const data: unknown = await res.json();
+    if (typeof data === "object" && data && "ok" in data && (data as { ok: boolean }).ok) {
+      return { ok: true };
+    }
+    return { ok: false, error: `Telegram response not ok: ${JSON.stringify(data).slice(0, 300)}` };
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : "Unknown telegram error" };
+  }
+}
+
 export async function sendTelegramMessage(message: string): Promise<{
   ok: boolean;
   error?: string;

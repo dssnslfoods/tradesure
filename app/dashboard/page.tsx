@@ -1,6 +1,9 @@
 import Link from "next/link";
+import { cookies } from "next/headers";
 import { getSupabaseAdmin } from "@/lib/supabase/server";
+import { verifySessionToken, SESSION_COOKIE } from "@/lib/auth/session";
 import BacktestButton from "./BacktestButton";
+import LogoutButton from "./LogoutButton";
 import SignalsTable, { type SignalRow } from "./SignalsTable";
 
 export const dynamic = "force-dynamic";
@@ -123,6 +126,8 @@ function computeStats(rows: Row[]): Stats {
 }
 
 export default async function DashboardPage() {
+  const c = await cookies();
+  const session = await verifySessionToken(c.get(SESSION_COOKIE)?.value ?? null);
   const rows = await loadRows();
   const stats = computeStats(rows);
 
@@ -143,6 +148,7 @@ export default async function DashboardPage() {
             ⏰ Schedule
           </Link>
           <BacktestButton />
+          <LogoutButton username={session?.un} />
         </div>
       </header>
 
