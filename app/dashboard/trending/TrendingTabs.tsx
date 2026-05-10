@@ -8,23 +8,29 @@ import {
   analyzeTrendingCoin,
   removeFromWatchlist,
 } from "./actions";
-import Sparkline from "./Sparkline";
+import Sparkline from "@/components/ui/Sparkline";
+import Icon, { type IconName } from "@/components/ui/Icon";
 
 type TabKey = "hottest" | "gainers" | "byVolume" | "losers" | "watchlist";
 type FilterMode = "all" | "blue_chip" | "no_meme";
 
-const TABS: { key: TabKey; label: string; icon: string; desc: string }[] = [
-  { key: "hottest", label: "Hottest", icon: "🔥", desc: "ราคาขึ้น × volume สูง" },
-  { key: "gainers", label: "Top gainers", icon: "🚀", desc: "ราคาขึ้นมากสุด 24h" },
-  { key: "byVolume", label: "Most traded", icon: "💧", desc: "Volume สูงสุด 24h" },
-  { key: "losers", label: "Top losers", icon: "📉", desc: "ราคาลงมากสุด 24h" },
-  { key: "watchlist", label: "Watchlist", icon: "⭐", desc: "เหรียญที่บันทึกไว้" },
+const TABS: {
+  key: TabKey;
+  label: string;
+  icon: IconName;
+  desc: string;
+}[] = [
+  { key: "hottest", label: "Hottest", icon: "flame", desc: "ราคาขึ้น × volume สูง" },
+  { key: "gainers", label: "Top gainers", icon: "trending-up", desc: "ราคาขึ้นมากสุด 24h" },
+  { key: "byVolume", label: "Most traded", icon: "droplet", desc: "Volume สูงสุด 24h" },
+  { key: "losers", label: "Top losers", icon: "trending-down", desc: "ราคาลงมากสุด 24h" },
+  { key: "watchlist", label: "Watchlist", icon: "star", desc: "เหรียญที่บันทึกไว้" },
 ];
 
-const FILTERS: { key: FilterMode; label: string; icon: string }[] = [
-  { key: "all", label: "All", icon: "🌐" },
-  { key: "no_meme", label: "ไม่รวม memecoin", icon: "🚫" },
-  { key: "blue_chip", label: "Blue chips", icon: "💎" },
+const FILTERS: { key: FilterMode; label: string; icon: IconName }[] = [
+  { key: "all", label: "All", icon: "globe" },
+  { key: "no_meme", label: "No memecoins", icon: "ban" },
+  { key: "blue_chip", label: "Blue chips", icon: "diamond" },
 ];
 
 export default function TrendingTabs({
@@ -73,60 +79,79 @@ export default function TrendingTabs({
     <>
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
         <div className="flex flex-wrap gap-2">
-          {TABS.map((t) => (
-            <button
-              key={t.key}
-              type="button"
-              onClick={() => setTab(t.key)}
-              className={`rounded-lg border px-4 py-2 text-sm font-semibold transition ${
-                tab === t.key
-                  ? "border-crypto-accent bg-crypto-accent/20 text-crypto-accent"
-                  : "border-crypto-border bg-crypto-panel text-slate-300 hover:bg-black/30"
-              }`}
-              title={t.desc}
-            >
-              {t.icon} {t.label}
-              {t.key === "watchlist" && buckets.watchlist.length > 0 && (
-                <span className="ml-1.5 rounded bg-amber-500/30 px-1.5 py-0.5 text-[10px] font-bold text-amber-200">
-                  {buckets.watchlist.length}
-                </span>
-              )}
-            </button>
-          ))}
+          {TABS.map((t) => {
+            const active = tab === t.key;
+            return (
+              <button
+                key={t.key}
+                type="button"
+                onClick={() => setTab(t.key)}
+                className={`chip transition !text-[12px] !px-3 !py-1.5 ${
+                  active
+                    ? "!bg-brand/15 !text-brand !border-brand/40"
+                    : "hover:!bg-surface-2 hover:!text-ink-primary"
+                }`}
+                title={t.desc}
+              >
+                <Icon name={t.icon} size={13} />
+                {t.label}
+                {t.key === "watchlist" && buckets.watchlist.length > 0 && (
+                  <span className="ml-1 rounded bg-sig-warn/30 px-1.5 py-0.5 text-[9px] font-bold text-sig-warn">
+                    {buckets.watchlist.length}
+                  </span>
+                )}
+              </button>
+            );
+          })}
         </div>
-        <div className="text-xs text-slate-500">
-          ⏱ refresh ใน <span className="tabular-nums text-slate-300">{secondsLeft}s</span>
+        <div className="flex items-center gap-2 rounded-chip border border-white/5 bg-surface-1/60 px-3 py-1.5 text-[11px] text-ink-muted">
+          <span className="pulse-dot" />
+          Refresh in <span className="tabular text-ink-primary">{secondsLeft}s</span>
         </div>
       </div>
 
-      <div className="mb-4 flex flex-wrap items-center gap-2 text-xs">
-        <span className="text-slate-500">Filter:</span>
-        {FILTERS.map((f) => (
-          <button
-            key={f.key}
-            type="button"
-            onClick={() => setFilter(f.key)}
-            className={`rounded-md border px-2 py-1 font-semibold transition ${
-              filter === f.key
-                ? "border-sky-500/50 bg-sky-500/15 text-sky-300"
-                : "border-crypto-border bg-crypto-panel text-slate-400 hover:bg-black/30"
-            }`}
-          >
-            {f.icon} {f.label}
-          </button>
-        ))}
+      <div className="mb-5 flex flex-wrap items-center gap-2 text-[11px]">
+        <span className="text-ink-muted">Filter:</span>
+        {FILTERS.map((f) => {
+          const active = filter === f.key;
+          return (
+            <button
+              key={f.key}
+              type="button"
+              onClick={() => setFilter(f.key)}
+              className={`chip !text-[11px] !py-1 transition ${
+                active
+                  ? "!bg-sig-info/15 !text-sig-info !border-sig-info/40"
+                  : "hover:!bg-surface-2 hover:!text-ink-primary"
+              }`}
+            >
+              <Icon name={f.icon} size={12} />
+              {f.label}
+            </button>
+          );
+        })}
       </div>
 
       {list.length === 0 ? (
-        <div className="rounded-xl border border-crypto-border bg-crypto-panel p-12 text-center text-sm text-slate-500">
-          {tab === "watchlist"
-            ? "ยังไม่มีเหรียญใน watchlist — กด ⭐ บนการ์ดเพื่อเพิ่ม"
-            : "ไม่มีข้อมูลตาม filter ที่เลือก"}
+        <div className="card flex flex-col items-center justify-center py-16 text-center">
+          <span className="mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-surface-2 text-ink-muted">
+            <Icon name={tab === "watchlist" ? "star" : "wave"} size={22} />
+          </span>
+          <div className="text-[15px] font-semibold text-ink-secondary">
+            {tab === "watchlist"
+              ? "ยังไม่มีเหรียญใน watchlist"
+              : "ไม่มีข้อมูลตาม filter ที่เลือก"}
+          </div>
+          {tab === "watchlist" && (
+            <div className="mt-1 text-[12px] text-ink-muted">
+              กดดาว ☆ บนการ์ดเพื่อเพิ่ม
+            </div>
+          )}
         </div>
       ) : (
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
           {list.map((t, i) => (
-            <CoinCard
+            <TokenCard
               key={t.symbol}
               ticker={t}
               rank={i + 1}
@@ -140,19 +165,25 @@ export default function TrendingTabs({
       {toast && (
         <div className="fixed bottom-6 right-6 z-50 max-w-md">
           <div
-            className={`flex items-start gap-3 rounded-lg border px-4 py-3 shadow-xl ${
+            className={`flex items-start gap-3 rounded-card border px-4 py-3 shadow-card backdrop-blur-glass ${
               toast.tone === "success"
-                ? "border-emerald-500/40 bg-emerald-500/15 text-emerald-200"
-                : "border-rose-500/40 bg-rose-500/15 text-rose-200"
+                ? "border-sig-buy/40 bg-sig-buy/15 text-sig-buy"
+                : "border-sig-sell/40 bg-sig-sell/15 text-sig-sell"
             }`}
           >
-            <span className="flex-1 text-sm">{toast.text}</span>
+            <Icon
+              name={toast.tone === "success" ? "circle-check" : "alert-triangle"}
+              size={16}
+              className="mt-0.5"
+            />
+            <span className="flex-1 text-[13px]">{toast.text}</span>
             <button
               type="button"
               onClick={() => setToast(null)}
-              className="text-xs opacity-60 hover:opacity-100"
+              className="text-ink-muted hover:text-ink-primary"
+              aria-label="Close"
             >
-              ✕
+              <Icon name="x" size={14} />
             </button>
           </div>
         </div>
@@ -161,7 +192,7 @@ export default function TrendingTabs({
   );
 }
 
-function CoinCard({
+function TokenCard({
   ticker,
   rank,
   showRank,
@@ -173,16 +204,14 @@ function CoinCard({
   onToast: (t: { tone: "success" | "error"; text: string }) => void;
 }) {
   const router = useRouter();
-  const [pending, startTransition] = useTransition();
-
-  const tvUrl = `https://www.tradingview.com/chart/?symbol=BINANCE:${encodeURIComponent(
-    ticker.symbol
-  )}`;
+  const [pending, start] = useTransition();
+  const positive = ticker.priceChangePercent >= 0;
+  const sign = positive ? "+" : "";
+  const tvUrl = `https://www.tradingview.com/chart/?symbol=BINANCE:${encodeURIComponent(ticker.symbol)}`;
   const binanceUrl = `https://www.binance.com/en/trade/${ticker.base}_USDT?type=spot`;
-  const sign = ticker.priceChangePercent >= 0 ? "+" : "";
 
   const onToggleWatch = () => {
-    startTransition(async () => {
+    start(async () => {
       const res = ticker.inWatchlist
         ? await removeFromWatchlist(ticker.symbol)
         : await addToWatchlist(ticker.symbol, ticker.base);
@@ -190,8 +219,8 @@ function CoinCard({
         onToast({
           tone: "success",
           text: ticker.inWatchlist
-            ? `🗑 เอา ${ticker.base} ออกจาก watchlist`
-            : `⭐ เพิ่ม ${ticker.base} เข้า watchlist`,
+            ? `Removed ${ticker.base} from watchlist`
+            : `Added ${ticker.base} to watchlist`,
         });
         router.refresh();
       } else {
@@ -203,7 +232,7 @@ function CoinCard({
   const onAnalyze = () => {
     if (!confirm(`ให้ AI วิเคราะห์ ${ticker.base} แล้วส่ง signal เข้า Telegram + dashboard?`))
       return;
-    startTransition(async () => {
+    start(async () => {
       const res = await analyzeTrendingCoin({
         symbol: ticker.symbol,
         hint: ticker.priceChangePercent >= 0 ? "BUY" : "SELL",
@@ -211,7 +240,7 @@ function CoinCard({
       if (res.ok) {
         onToast({
           tone: "success",
-          text: `🤖 AI วิเคราะห์ ${ticker.base} เสร็จ (bias: ${res.bias}, conf: ${res.confidence}%) ${
+          text: `AI วิเคราะห์ ${ticker.base} เสร็จ (bias: ${res.bias}, conf: ${res.confidence}%) ${
             res.telegram_sent ? "· ส่ง Telegram แล้ว" : ""
           }`,
         });
@@ -223,98 +252,109 @@ function CoinCard({
 
   const tagBadge =
     ticker.tag === "blue_chip"
-      ? { text: "💎 blue chip", cls: "bg-sky-500/20 text-sky-300" }
+      ? { text: "Blue chip", icon: "diamond" as IconName, cls: "!bg-sig-info/15 !text-sig-info !border-sig-info/30" }
       : ticker.tag === "memecoin"
-      ? { text: "🐶 memecoin", cls: "bg-pink-500/20 text-pink-300" }
+      ? { text: "Memecoin", icon: "alert-triangle" as IconName, cls: "!bg-sig-violet/15 !text-sig-violet !border-sig-violet/30" }
       : null;
 
   return (
-    <div className="group relative overflow-hidden rounded-xl border border-crypto-border bg-crypto-panel p-4 shadow-lg transition hover:border-crypto-accent/40">
+    <div className="card relative overflow-hidden p-[18px] transition hover:-translate-y-0.5 hover:border-strong">
       {showRank && (
-        <div className="absolute -right-3 -top-3 select-none text-6xl font-black opacity-5">
+        <span className="pointer-events-none absolute -right-3 -top-2 select-none text-[80px] font-black text-white/[0.03]">
           {rank}
-        </div>
+        </span>
       )}
 
-      <div className="mb-2 flex items-start justify-between">
-        <div>
+      <div className="flex items-start justify-between gap-2">
+        <div className="min-w-0">
           {showRank && (
-            <div className="text-xs uppercase tracking-wider text-slate-500">#{rank}</div>
+            <div className="text-[9px] uppercase tracking-eyebrow text-ink-faint">#{rank}</div>
           )}
           <div className="mt-0.5 flex items-center gap-2">
-            <div className="text-xl font-bold text-slate-100">{ticker.base}</div>
+            <span className="text-[18px] font-bold tracking-tightest text-ink-primary">
+              {ticker.base}
+            </span>
             <button
               type="button"
               onClick={onToggleWatch}
               disabled={pending}
-              className={`text-lg leading-none transition ${
-                ticker.inWatchlist ? "text-amber-300" : "text-slate-600 hover:text-amber-300"
+              className={`flex h-6 w-6 items-center justify-center rounded transition ${
+                ticker.inWatchlist
+                  ? "text-sig-warn"
+                  : "text-ink-faint hover:text-sig-warn"
               }`}
-              title={ticker.inWatchlist ? "เอาออกจาก watchlist" : "เพิ่มเข้า watchlist"}
+              aria-label={ticker.inWatchlist ? "Remove from watchlist" : "Add to watchlist"}
             >
-              {ticker.inWatchlist ? "★" : "☆"}
+              <Icon name={ticker.inWatchlist ? "star-filled" : "star"} size={15} />
             </button>
           </div>
-          <div className="text-[10px] text-slate-500">{ticker.symbol}</div>
+          <div className="font-mono text-[10px] text-ink-muted">{ticker.symbol}</div>
         </div>
         <span
-          className={`rounded-md border px-2 py-1 text-xs font-bold ${ticker.pctClass}`}
+          className={`chip !text-[11px] !py-1 !px-2 ${
+            positive ? "chip-buy" : "chip-sell"
+          }`}
         >
+          <Icon name={positive ? "arrow-up-right" : "arrow-down-right"} size={10} />
           {sign}
           {ticker.priceChangePercent.toFixed(2)}%
         </span>
       </div>
 
       {tagBadge && (
-        <div className="mb-2">
-          <span className={`rounded px-1.5 py-0.5 text-[10px] font-semibold ${tagBadge.cls}`}>
+        <div className="mt-2">
+          <span className={`chip !text-[10px] !py-0.5 !px-1.5 ${tagBadge.cls}`}>
+            <Icon name={tagBadge.icon} size={10} />
             {tagBadge.text}
           </span>
         </div>
       )}
 
-      <div className="mb-3 -mx-2">
+      <div className="-mx-1 mt-3">
         <Sparkline
           data={ticker.sparkline}
-          width={200}
-          height={40}
-          positive={ticker.priceChangePercent >= 0}
+          width={240}
+          height={56}
+          color={positive ? "var(--accent)" : "var(--sell)"}
         />
       </div>
 
-      <div className="space-y-1.5">
-        <Row label="ราคา" value={`$${ticker.lastPriceFmt}`} bold />
-        <Row label="High 24h" value={`$${formatPrice(ticker.highPrice)}`} />
-        <Row label="Low 24h" value={`$${formatPrice(ticker.lowPrice)}`} />
-        <Row label="Volume" value={ticker.quoteVolumeFmt} />
-        <Row label="Trades" value={ticker.count.toLocaleString("en-US")} />
+      <div className="mt-3 space-y-1.5 text-[12px]">
+        <KV label="ราคา" value={`$${ticker.lastPriceFmt}`} bold />
+        <KV label="High 24h" value={`$${formatPrice(ticker.highPrice)}`} />
+        <KV label="Low 24h" value={`$${formatPrice(ticker.lowPrice)}`} />
+        <KV label="Volume" value={ticker.quoteVolumeFmt} />
+        <KV label="Trades" value={ticker.count.toLocaleString("en-US")} />
       </div>
 
-      <div className="mt-3 space-y-2 border-t border-crypto-border pt-3">
+      <div className="mt-4 space-y-2 border-t border-white/5 pt-3">
         <button
           type="button"
           onClick={onAnalyze}
           disabled={pending}
-          className="w-full rounded-md border border-crypto-accent/40 bg-crypto-accent/10 px-2 py-1.5 text-xs font-semibold text-crypto-accent hover:bg-crypto-accent/20 disabled:opacity-40"
+          className="btn btn-primary w-full justify-center !py-2 !text-[12px] disabled:opacity-50"
         >
-          {pending ? "…" : "🤖 Analyze with AI"}
+          <Icon name="robot" size={14} />
+          {pending ? "Working…" : "Analyze with AI"}
         </button>
         <div className="flex gap-2">
           <a
             href={tvUrl}
             target="_blank"
             rel="noopener noreferrer"
-            className="flex-1 rounded-md border border-sky-500/30 bg-sky-500/10 px-2 py-1 text-center text-xs font-semibold text-sky-300 hover:bg-sky-500/20"
+            className="btn btn-ghost flex-1 justify-center !py-1.5 !text-[11px]"
           >
-            📊 Chart
+            <Icon name="chart-candle" size={12} />
+            Chart
           </a>
           <a
             href={binanceUrl}
             target="_blank"
             rel="noopener noreferrer"
-            className="flex-1 rounded-md border border-amber-500/30 bg-amber-500/10 px-2 py-1 text-center text-xs font-semibold text-amber-300 hover:bg-amber-500/20"
+            className="btn btn-ghost flex-1 justify-center !py-1.5 !text-[11px]"
           >
-            💱 Binance
+            <Icon name="external" size={12} />
+            Binance
           </a>
         </div>
       </div>
@@ -322,11 +362,15 @@ function CoinCard({
   );
 }
 
-function Row({ label, value, bold }: { label: string; value: string; bold?: boolean }) {
+function KV({ label, value, bold }: { label: string; value: string; bold?: boolean }) {
   return (
-    <div className="flex items-baseline justify-between text-sm">
-      <span className="text-xs text-slate-500">{label}</span>
-      <span className={`tabular-nums ${bold ? "font-semibold text-slate-100" : "text-slate-300"}`}>
+    <div className="flex items-baseline justify-between">
+      <span className="text-[10px] text-ink-muted">{label}</span>
+      <span
+        className={`font-mono tabular ${
+          bold ? "font-semibold text-ink-primary" : "text-ink-secondary"
+        }`}
+      >
         {value}
       </span>
     </div>

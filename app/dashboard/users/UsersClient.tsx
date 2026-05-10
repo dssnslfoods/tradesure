@@ -10,6 +10,7 @@ import {
 } from "./actions";
 import type { UserRow, ContactRow } from "./page";
 import TelegramWebhookPanel from "./TelegramWebhookPanel";
+import Icon from "@/components/ui/Icon";
 
 function fmtTime(iso: string | null) {
   if (!iso) return "-";
@@ -22,6 +23,10 @@ function contactDisplayName(c: ContactRow) {
     c.username ||
     `chat:${c.chat_id}`
   );
+}
+
+function avatarInitials(s: string) {
+  return s.slice(0, 1).toUpperCase();
 }
 
 export default function UsersClient({
@@ -45,28 +50,26 @@ export default function UsersClient({
     <>
       <TelegramWebhookPanel />
 
-      <section className="mb-8">
-        <div className="mb-3 flex items-center justify-between">
-          <h2 className="text-xl font-semibold">Auth users ({users.length})</h2>
+      <section className="mb-7">
+        <div className="mb-3 flex items-center gap-2">
+          <Icon name="user" size={14} className="text-ink-secondary" />
+          <h2 className="text-[15px] font-semibold text-ink-primary">Auth users</h2>
+          <span className="text-[11px] text-ink-muted">({users.length})</span>
         </div>
-        <div className="overflow-hidden rounded-xl border border-crypto-border bg-crypto-panel">
+        <div className="card overflow-hidden">
           <div className="overflow-x-auto">
-            <table className="min-w-full divide-y divide-crypto-border text-sm">
-              <thead className="bg-black/30 text-left text-xs uppercase tracking-wider text-slate-400">
+            <table className="min-w-full divide-y divide-white/5 text-[12px]">
+              <thead className="bg-surface-2/40 text-left">
                 <tr>
-                  <th className="px-4 py-3">Username</th>
-                  <th className="px-4 py-3">Display name</th>
-                  <th className="px-4 py-3">Chat ID</th>
-                  <th className="px-4 py-3">Created</th>
-                  <th className="px-4 py-3">Last login</th>
-                  <th className="px-4 py-3">Active</th>
-                  <th className="px-4 py-3">Admin</th>
+                  {["Username","Display name","Chat ID","Created","Last login","Active","Admin"].map(h => (
+                    <th key={h} className="px-4 py-3 eyebrow !text-[10px]">{h}</th>
+                  ))}
                 </tr>
               </thead>
-              <tbody className="divide-y divide-crypto-border">
+              <tbody className="divide-y divide-white/5">
                 {users.length === 0 && (
                   <tr>
-                    <td colSpan={7} className="px-4 py-8 text-center text-slate-500">
+                    <td colSpan={7} className="px-4 py-8 text-center text-ink-muted">
                       ยังไม่มี user
                     </td>
                   </tr>
@@ -87,44 +90,47 @@ export default function UsersClient({
 
       <section>
         <div className="mb-3 flex items-center justify-between">
-          <h2 className="text-xl font-semibold">
-            Telegram contacts ({visibleContacts.length}
-            {pendingContactsOnly ? ` / ${contacts.length}` : ""})
-          </h2>
-          <label className="flex items-center gap-2 text-xs text-slate-400">
+          <div className="flex items-center gap-2">
+            <Icon name="telegram" size={14} className="text-sig-info" />
+            <h2 className="text-[15px] font-semibold text-ink-primary">Telegram contacts</h2>
+            <span className="text-[11px] text-ink-muted">
+              ({visibleContacts.length}
+              {pendingContactsOnly ? ` / ${contacts.length}` : ""})
+            </span>
+          </div>
+          <label className="flex items-center gap-2 text-[11px] text-ink-secondary">
             <input
               type="checkbox"
               checked={pendingContactsOnly}
               onChange={(e) => setPendingOnly(e.target.checked)}
-              className="h-4 w-4 cursor-pointer accent-emerald-500"
+              className="h-4 w-4 cursor-pointer accent-brand"
             />
             แสดงเฉพาะที่ยังไม่ได้สร้าง user
           </label>
         </div>
 
-        <div className="overflow-hidden rounded-xl border border-crypto-border bg-crypto-panel">
+        <div className="card overflow-hidden">
           <div className="overflow-x-auto">
-            <table className="min-w-full divide-y divide-crypto-border text-sm">
-              <thead className="bg-black/30 text-left text-xs uppercase tracking-wider text-slate-400">
+            <table className="min-w-full divide-y divide-white/5 text-[12px]">
+              <thead className="bg-surface-2/40 text-left">
                 <tr>
-                  <th className="px-4 py-3">Name</th>
-                  <th className="px-4 py-3">Telegram username</th>
-                  <th className="px-4 py-3">Chat ID</th>
-                  <th className="px-4 py-3">Last message</th>
-                  <th className="px-4 py-3">Msgs</th>
-                  <th className="px-4 py-3">First seen</th>
-                  <th className="px-4 py-3">Last seen</th>
-                  <th className="px-4 py-3">Status</th>
-                  <th className="px-4 py-3 text-right">Actions</th>
+                  {["Name","Username","Chat ID","Last message","Msgs","Last seen","Status","Actions"].map(h => (
+                    <th key={h} className="px-4 py-3 eyebrow !text-[10px]">{h}</th>
+                  ))}
                 </tr>
               </thead>
-              <tbody className="divide-y divide-crypto-border">
+              <tbody className="divide-y divide-white/5">
                 {visibleContacts.length === 0 && (
                   <tr>
-                    <td colSpan={9} className="px-4 py-8 text-center text-slate-500">
-                      {pendingContactsOnly
-                        ? "ไม่มี contact ที่ค้างอยู่ — ทุกคนถูกสร้างเป็น user แล้ว"
-                        : "ยังไม่มีคนส่งข้อความหา bot"}
+                    <td colSpan={8} className="px-4 py-12 text-center">
+                      <span className="mx-auto mb-2 flex h-10 w-10 items-center justify-center rounded-full bg-sig-buy/15 text-sig-buy">
+                        <Icon name="circle-check" size={18} />
+                      </span>
+                      <div className="text-[13px] text-ink-secondary">
+                        {pendingContactsOnly
+                          ? "ไม่มี contact ที่ค้างอยู่"
+                          : "ยังไม่มีคนส่งข้อความหา bot"}
+                      </div>
                     </td>
                   </tr>
                 )}
@@ -149,19 +155,20 @@ export default function UsersClient({
       {toast && (
         <div className="fixed bottom-6 right-6 z-50 max-w-md">
           <div
-            className={`flex items-start gap-3 rounded-lg border px-4 py-3 shadow-xl ${
+            className={`flex items-start gap-3 rounded-card border px-4 py-3 shadow-card ${
               toast.tone === "success"
-                ? "border-emerald-500/40 bg-emerald-500/15 text-emerald-200"
-                : "border-rose-500/40 bg-rose-500/15 text-rose-200"
+                ? "border-sig-buy/40 bg-sig-buy/15 text-sig-buy"
+                : "border-sig-sell/40 bg-sig-sell/15 text-sig-sell"
             }`}
           >
-            <span className="flex-1 text-sm">{toast.text}</span>
-            <button
-              type="button"
-              onClick={() => setToast(null)}
-              className="text-xs opacity-60 hover:opacity-100"
-            >
-              ✕
+            <Icon
+              name={toast.tone === "success" ? "circle-check" : "alert-triangle"}
+              size={16}
+              className="mt-0.5"
+            />
+            <span className="flex-1 text-[13px]">{toast.text}</span>
+            <button type="button" onClick={() => setToast(null)} aria-label="Close">
+              <Icon name="x" size={14} />
             </button>
           </div>
         </div>
@@ -202,25 +209,38 @@ function UserRowItem({
   };
 
   return (
-    <tr className={`hover:bg-black/20 ${isMe ? "bg-sky-500/5" : ""}`}>
-      <td className="whitespace-nowrap px-4 py-3 font-semibold text-slate-100">
-        {u.username}
-        {isMe && (
-          <span className="ml-2 rounded bg-sky-500/20 px-1.5 py-0.5 text-[10px] font-semibold uppercase text-sky-300">
-            you
+    <tr className={`hover:bg-surface-2/30 ${isMe ? "bg-sig-info/[0.04]" : ""}`}>
+      <td className="whitespace-nowrap px-4 py-3">
+        <div className="flex items-center gap-2.5">
+          <span
+            className="flex h-7 w-7 items-center justify-center rounded-full text-[11px] font-bold"
+            style={{
+              background: "linear-gradient(135deg, var(--accent-hi), var(--accent-lo))",
+              color: "#001b14",
+            }}
+          >
+            {avatarInitials(u.username)}
           </span>
-        )}
+          <div>
+            <div className="font-semibold text-ink-primary">{u.username}</div>
+            {isMe && (
+              <span className="rounded bg-sig-info/15 px-1 py-px text-[9px] font-bold uppercase tracking-eyebrow text-sig-info">
+                you
+              </span>
+            )}
+          </div>
+        </div>
       </td>
-      <td className="whitespace-nowrap px-4 py-3 text-slate-300">
+      <td className="whitespace-nowrap px-4 py-3 text-ink-secondary">
         {u.display_name ?? "-"}
       </td>
-      <td className="whitespace-nowrap px-4 py-3 font-mono text-xs text-slate-400">
+      <td className="whitespace-nowrap px-4 py-3 font-mono text-[10px] text-ink-muted">
         {u.telegram_chat_id}
       </td>
-      <td className="whitespace-nowrap px-4 py-3 text-xs text-slate-400">
+      <td className="whitespace-nowrap px-4 py-3 font-mono text-[11px] text-ink-muted">
         {fmtTime(u.created_at)}
       </td>
-      <td className="whitespace-nowrap px-4 py-3 text-xs text-slate-400">
+      <td className="whitespace-nowrap px-4 py-3 font-mono text-[11px] text-ink-muted">
         {fmtTime(u.last_login_at)}
       </td>
       <td className="px-4 py-3">
@@ -229,13 +249,12 @@ function UserRowItem({
           onClick={onToggleActive}
           disabled={pending || (isMe && u.is_active)}
           title={isMe && u.is_active ? "ไม่สามารถ deactivate ตัวเองได้" : undefined}
-          className={`rounded px-2 py-0.5 text-xs font-semibold disabled:cursor-not-allowed disabled:opacity-40 ${
-            u.is_active
-              ? "bg-emerald-500/20 text-emerald-300 hover:bg-emerald-500/30"
-              : "bg-slate-500/20 text-slate-400 hover:bg-slate-500/30"
+          className={`chip !text-[10px] disabled:cursor-not-allowed disabled:opacity-50 ${
+            u.is_active ? "chip-buy" : "chip-mute"
           }`}
         >
-          {u.is_active ? "✓ active" : "○ disabled"}
+          <Icon name={u.is_active ? "circle-check" : "circle-x"} size={11} />
+          {u.is_active ? "active" : "disabled"}
         </button>
       </td>
       <td className="px-4 py-3">
@@ -243,13 +262,12 @@ function UserRowItem({
           type="button"
           onClick={onToggleAdmin}
           disabled={pending}
-          className={`rounded px-2 py-0.5 text-xs font-semibold disabled:opacity-40 ${
-            u.is_admin
-              ? "bg-amber-500/20 text-amber-300 hover:bg-amber-500/30"
-              : "bg-slate-500/20 text-slate-400 hover:bg-slate-500/30"
+          className={`chip !text-[10px] ${
+            u.is_admin ? "chip-warn" : "chip-mute"
           }`}
         >
-          {u.is_admin ? "★ admin" : "user"}
+          <Icon name={u.is_admin ? "shield-check" : "user"} size={11} />
+          {u.is_admin ? "admin" : "user"}
         </button>
       </td>
     </tr>
@@ -275,29 +293,39 @@ function ContactRowItem({
   };
 
   return (
-    <tr className="hover:bg-black/20">
-      <td className="whitespace-nowrap px-4 py-3 font-semibold text-slate-100">
-        {contactDisplayName(c)}
+    <tr className="hover:bg-surface-2/30">
+      <td className="whitespace-nowrap px-4 py-3">
+        <div className="flex items-center gap-2.5">
+          <span
+            className="flex h-7 w-7 items-center justify-center rounded-full text-[11px] font-bold"
+            style={{
+              background: "linear-gradient(135deg, var(--info), var(--violet))",
+              color: "#001b14",
+            }}
+          >
+            {avatarInitials(contactDisplayName(c))}
+          </span>
+          <span className="font-semibold text-ink-primary">{contactDisplayName(c)}</span>
+        </div>
       </td>
-      <td className="whitespace-nowrap px-4 py-3 text-slate-300">
+      <td className="whitespace-nowrap px-4 py-3 text-ink-secondary">
         {c.username ? `@${c.username}` : "-"}
       </td>
-      <td className="whitespace-nowrap px-4 py-3 font-mono text-xs text-slate-400">
-        {c.chat_id}
-      </td>
-      <td className="max-w-xs truncate px-4 py-3 text-xs text-slate-400" title={c.last_message_text ?? ""}>
+      <td className="whitespace-nowrap px-4 py-3 font-mono text-[10px] text-ink-muted">{c.chat_id}</td>
+      <td className="max-w-xs truncate px-4 py-3 text-[11px] text-ink-muted" title={c.last_message_text ?? ""}>
         {c.last_message_text ?? "-"}
       </td>
-      <td className="px-4 py-3 text-center text-slate-300 tabular-nums">{c.message_count}</td>
-      <td className="whitespace-nowrap px-4 py-3 text-xs text-slate-400">{fmtTime(c.first_seen_at)}</td>
-      <td className="whitespace-nowrap px-4 py-3 text-xs text-slate-400">{fmtTime(c.last_seen_at)}</td>
+      <td className="px-4 py-3 text-center tabular text-ink-secondary">{c.message_count}</td>
+      <td className="whitespace-nowrap px-4 py-3 font-mono text-[11px] text-ink-muted">{fmtTime(c.last_seen_at)}</td>
       <td className="px-4 py-3">
         {c.registered_user_id ? (
-          <span className="rounded bg-emerald-500/20 px-2 py-0.5 text-xs font-semibold text-emerald-300">
-            ✓ registered
+          <span className="chip chip-buy !text-[10px]">
+            <Icon name="circle-check" size={11} />
+            registered
           </span>
         ) : (
-          <span className="rounded bg-amber-500/20 px-2 py-0.5 text-xs font-semibold text-amber-300">
+          <span className="chip chip-warn !text-[10px]">
+            <Icon name="clock" size={11} />
             pending
           </span>
         )}
@@ -309,19 +337,20 @@ function ContactRowItem({
               type="button"
               onClick={onRegister}
               disabled={pending}
-              className="rounded border border-emerald-500/40 bg-emerald-500/10 px-2 py-1 text-xs font-semibold text-emerald-300 hover:bg-emerald-500/20 disabled:opacity-40"
+              className="btn !bg-sig-buy/15 !text-sig-buy !border-sig-buy/30 hover:!bg-sig-buy/25 !py-1 !px-2 !text-[11px] disabled:opacity-40"
             >
-              ➕ Create user
+              <Icon name="user-plus" size={11} />
+              Create user
             </button>
           )}
           <button
             type="button"
             onClick={onDelete}
             disabled={pending}
-            className="rounded border border-rose-500/40 bg-rose-500/10 px-2 py-1 text-xs font-semibold text-rose-300 hover:bg-rose-500/20 disabled:opacity-40"
-            title="Delete contact"
+            className="flex h-7 w-7 items-center justify-center rounded border border-sig-sell/30 bg-sig-sell/10 text-sig-sell transition hover:bg-sig-sell/20 disabled:opacity-40"
+            aria-label="Delete contact"
           >
-            🗑
+            <Icon name="trash" size={12} />
           </button>
         </div>
       </td>
@@ -345,17 +374,18 @@ function RegisterModal({
 
   if (!contact) return null;
 
-  // Suggest username from telegram username on first open
-  if (username === "" && contact.username) {
-    // run once via render; using state to set means we need useEffect — keep it simple
-  }
-
   const suggestUsername =
     contact.username ||
-    [contact.first_name, contact.last_name].filter(Boolean).join("").toLowerCase().replace(/[^a-z0-9_-]/g, "") ||
+    [contact.first_name, contact.last_name]
+      .filter(Boolean)
+      .join("")
+      .toLowerCase()
+      .replace(/[^a-z0-9_-]/g, "") ||
     `user${contact.chat_id.slice(-4)}`;
   const suggestDisplay =
-    [contact.first_name, contact.last_name].filter(Boolean).join(" ") || contact.username || "";
+    [contact.first_name, contact.last_name].filter(Boolean).join(" ") ||
+    contact.username ||
+    "";
 
   const onSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -378,90 +408,80 @@ function RegisterModal({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm"
       onClick={onClose}
     >
       <div
-        className="w-full max-w-md rounded-2xl border border-crypto-border bg-crypto-panel p-6 shadow-2xl"
+        className="card glass relative w-full max-w-md p-6"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="mb-4 flex items-start justify-between">
+        <div className="mb-5 flex items-start justify-between">
           <div>
-            <h2 className="text-lg font-bold">สร้าง user จาก Telegram contact</h2>
-            <p className="text-xs text-slate-400">
-              {contactDisplayName(contact)} · chat:{contact.chat_id}
+            <div className="eyebrow">Register from contact</div>
+            <h2 className="mt-1 text-[18px] font-bold tracking-tightest text-ink-primary">
+              Create user
+            </h2>
+            <p className="mt-1 font-mono text-[11px] text-ink-muted">
+              chat:{contact.chat_id}
             </p>
           </div>
-          <button
-            type="button"
-            onClick={onClose}
-            className="text-slate-400 hover:text-slate-200"
-            aria-label="Close"
-          >
-            ✕
+          <button type="button" onClick={onClose} className="text-ink-muted hover:text-ink-primary">
+            <Icon name="x" size={18} />
           </button>
         </div>
 
-        <form onSubmit={onSubmit} className="space-y-3">
-          <div>
-            <label className="mb-1 block text-xs font-medium text-slate-400">
-              Username <span className="text-rose-400">*</span>
-            </label>
+        <form onSubmit={onSubmit} className="space-y-4">
+          <label className="block">
+            <div className="mb-1.5 text-[10px] font-semibold uppercase tracking-eyebrow text-ink-muted">
+              Username <span className="text-sig-sell">*</span>
+            </div>
             <input
               type="text"
               value={username}
               onChange={(e) => setUsername(e.target.value)}
               placeholder={suggestUsername}
               autoFocus
-              className="w-full rounded-lg border border-crypto-border bg-black/40 px-3 py-2 text-slate-100 placeholder-slate-600 focus:border-crypto-accent focus:outline-none"
+              className="h-10 w-full rounded-chip border border-white/5 bg-surface-2/60 px-3 text-[13px] text-ink-primary placeholder:text-ink-faint focus:border-brand/40"
             />
-            <p className="mt-1 text-[10px] text-slate-500">
-              ใช้สำหรับ login (a-z, A-Z, 0-9, _, -)
-            </p>
-          </div>
-          <div>
-            <label className="mb-1 block text-xs font-medium text-slate-400">
+            <p className="mt-1 text-[10px] text-ink-muted">a-z, A-Z, 0-9, _, -</p>
+          </label>
+          <label className="block">
+            <div className="mb-1.5 text-[10px] font-semibold uppercase tracking-eyebrow text-ink-muted">
               Display name
-            </label>
+            </div>
             <input
               type="text"
               value={displayName}
               onChange={(e) => setDisplayName(e.target.value)}
               placeholder={suggestDisplay}
-              className="w-full rounded-lg border border-crypto-border bg-black/40 px-3 py-2 text-slate-100 placeholder-slate-600 focus:border-crypto-accent focus:outline-none"
+              className="h-10 w-full rounded-chip border border-white/5 bg-surface-2/60 px-3 text-[13px] text-ink-primary placeholder:text-ink-faint focus:border-brand/40"
             />
-          </div>
-          <label className="flex items-center gap-2 text-sm text-slate-300">
+          </label>
+          <label className="flex items-center gap-2 rounded-chip bg-surface-2/40 px-3 py-2.5 text-[13px] text-ink-secondary">
             <input
               type="checkbox"
               checked={isAdmin}
               onChange={(e) => setIsAdmin(e.target.checked)}
-              className="h-4 w-4 cursor-pointer accent-amber-500"
+              className="h-4 w-4 cursor-pointer accent-sig-warn"
             />
-            ★ ให้สิทธิ์ admin (จัดการ users + ทุก feature)
+            <Icon name="shield-check" size={13} className="text-sig-warn" />
+            ให้สิทธิ์ admin (จัดการ users + ทุก feature)
           </label>
 
           {err && (
-            <p className="rounded-md border border-rose-500/30 bg-rose-500/10 px-3 py-2 text-xs text-rose-300">
+            <p className="flex items-start gap-2 rounded-chip border border-sig-sell/30 bg-sig-sell/10 px-3 py-2 text-[11px] text-sig-sell">
+              <Icon name="alert-triangle" size={12} className="mt-0.5" />
               {err}
             </p>
           )}
 
           <div className="flex justify-end gap-2 pt-2">
-            <button
-              type="button"
-              onClick={onClose}
-              disabled={pending}
-              className="rounded-lg border border-crypto-border bg-black/30 px-4 py-2 text-sm text-slate-300 hover:bg-black/50 disabled:opacity-40"
-            >
+            <button type="button" onClick={onClose} disabled={pending} className="btn btn-ghost">
               ยกเลิก
             </button>
-            <button
-              type="submit"
-              disabled={pending}
-              className="rounded-lg bg-emerald-500 px-4 py-2 text-sm font-semibold text-black hover:opacity-90 disabled:opacity-40"
-            >
-              {pending ? "กำลังสร้าง…" : "✅ สร้าง user"}
+            <button type="submit" disabled={pending} className="btn btn-primary">
+              <Icon name="user-plus" size={14} />
+              {pending ? "Creating…" : "Create user"}
             </button>
           </div>
         </form>

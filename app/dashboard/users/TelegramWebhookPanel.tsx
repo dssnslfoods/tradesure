@@ -8,6 +8,7 @@ import {
   setTelegramWebhook,
   type TelegramWebhookInfo,
 } from "./actions";
+import Icon from "@/components/ui/Icon";
 
 const EXPECTED_PATH = "/api/telegram/bot";
 
@@ -37,12 +38,12 @@ export default function TelegramWebhookPanel() {
     startTransition(async () => {
       const r = await setTelegramWebhook();
       if (r.ok) {
-        setMsg({ tone: "success", text: `✅ ผูก webhook สำเร็จ → ${r.url}` });
+        setMsg({ tone: "success", text: `ผูก webhook สำเร็จ → ${r.url}` });
         const fresh = await getTelegramWebhookInfo();
         setInfo(fresh);
         router.refresh();
       } else {
-        setMsg({ tone: "error", text: `❌ ${r.error ?? "failed"}` });
+        setMsg({ tone: "error", text: r.error ?? "failed" });
       }
     });
   };
@@ -53,11 +54,11 @@ export default function TelegramWebhookPanel() {
     startTransition(async () => {
       const r = await deleteTelegramWebhook();
       if (r.ok) {
-        setMsg({ tone: "success", text: "✅ ยกเลิก webhook แล้ว" });
+        setMsg({ tone: "success", text: "ยกเลิก webhook แล้ว" });
         const fresh = await getTelegramWebhookInfo();
         setInfo(fresh);
       } else {
-        setMsg({ tone: "error", text: `❌ ${r.error ?? "failed"}` });
+        setMsg({ tone: "error", text: r.error ?? "failed" });
       }
     });
   };
@@ -81,14 +82,14 @@ export default function TelegramWebhookPanel() {
         if (data.ok) {
           setMsg({
             tone: "success",
-            text: `✅ ส่ง broadcast test สำเร็จ ${data.sent} chat${
+            text: `Broadcast test ส่งสำเร็จ ${data.sent} chat${
               data.failed ? ` (failed ${data.failed})` : ""
             } — ตรวจ Telegram`,
           });
         } else {
           setMsg({
             tone: "error",
-            text: `❌ ${data.error ?? data.errors?.join(", ") ?? "failed"}`,
+            text: data.error ?? data.errors?.join(", ") ?? "failed",
           });
         }
       } catch (e) {
@@ -102,40 +103,47 @@ export default function TelegramWebhookPanel() {
   const isUnset = info?.ok && !info.url;
 
   return (
-    <section className="mb-8 rounded-xl border border-crypto-border bg-crypto-panel p-5">
-      <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h2 className="text-lg font-semibold">🤖 Telegram Bot Webhook</h2>
-          <p className="mt-0.5 text-xs text-slate-400">
-            ระบบจะรับ message จาก Telegram และเก็บ chat ID อัตโนมัติ
-          </p>
+    <section className="card mb-7 p-5">
+      <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
+        <div className="flex items-start gap-3">
+          <span className="flex h-10 w-10 items-center justify-center rounded-chip bg-sig-info/15 text-sig-info">
+            <Icon name="robot" size={18} />
+          </span>
+          <div>
+            <h2 className="text-[15px] font-semibold text-ink-primary">Telegram Bot Webhook</h2>
+            <p className="mt-0.5 text-[11px] text-ink-muted">
+              ระบบจะรับ message จาก Telegram และเก็บ chat ID อัตโนมัติ
+            </p>
+          </div>
         </div>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
           <button
             type="button"
             onClick={refresh}
             disabled={pending}
-            className="rounded border border-crypto-border bg-black/30 px-3 py-1.5 text-xs text-slate-300 hover:bg-black/50 disabled:opacity-40"
+            className="btn btn-ghost !py-1.5 !text-[11px] disabled:opacity-40"
           >
-            🔄 Refresh
+            <Icon name="refresh" size={12} />
+            Refresh
           </button>
           <button
             type="button"
             onClick={onTestBroadcast}
             disabled={pending}
-            className="rounded border border-amber-500/40 bg-amber-500/10 px-3 py-1.5 text-xs font-semibold text-amber-300 hover:bg-amber-500/20 disabled:opacity-40"
-            title="ส่ง broadcast test ไปทุก active user"
+            className="btn !bg-sig-warn/15 !text-sig-warn !border-sig-warn/30 hover:!bg-sig-warn/25 !py-1.5 !text-[11px] disabled:opacity-40"
           >
-            🧪 Test broadcast
+            <Icon name="send" size={12} />
+            Test broadcast
           </button>
           {(isUnset || isOtherUrl) && (
             <button
               type="button"
               onClick={onSetup}
               disabled={pending}
-              className="rounded border border-emerald-500/40 bg-emerald-500/10 px-3 py-1.5 text-xs font-semibold text-emerald-300 hover:bg-emerald-500/20 disabled:opacity-40"
+              className="btn btn-primary !py-1.5 !text-[11px] disabled:opacity-40"
             >
-              {pending ? "กำลังตั้งค่า…" : "🔌 Setup webhook"}
+              <Icon name="play" size={12} />
+              {pending ? "กำลังตั้งค่า…" : "Setup webhook"}
             </button>
           )}
           {isOk && (
@@ -144,104 +152,109 @@ export default function TelegramWebhookPanel() {
                 type="button"
                 onClick={onSetup}
                 disabled={pending}
-                className="rounded border border-sky-500/40 bg-sky-500/10 px-3 py-1.5 text-xs font-semibold text-sky-300 hover:bg-sky-500/20 disabled:opacity-40"
+                className="btn !bg-sig-info/15 !text-sig-info !border-sig-info/30 hover:!bg-sig-info/25 !py-1.5 !text-[11px] disabled:opacity-40"
               >
-                {pending ? "…" : "🔄 Re-register"}
+                <Icon name="refresh" size={12} />
+                Re-register
               </button>
               <button
                 type="button"
                 onClick={onDelete}
                 disabled={pending}
-                className="rounded border border-rose-500/40 bg-rose-500/10 px-3 py-1.5 text-xs font-semibold text-rose-300 hover:bg-rose-500/20 disabled:opacity-40"
+                className="btn !bg-sig-sell/15 !text-sig-sell !border-sig-sell/30 hover:!bg-sig-sell/25 !py-1.5 !text-[11px] disabled:opacity-40"
               >
-                {pending ? "…" : "🗑 Delete"}
+                <Icon name="trash" size={12} />
+                Delete
               </button>
             </>
           )}
         </div>
       </div>
 
-      {loading && (
-        <p className="text-xs text-slate-500">กำลังโหลดสถานะ…</p>
-      )}
+      {loading && <p className="text-[11px] text-ink-muted">กำลังโหลดสถานะ…</p>}
 
       {!loading && info && (
-        <div className="space-y-2 rounded-lg border border-crypto-border bg-black/30 p-3 text-sm">
-          <Row label="Status">
-            {!info.ok ? (
-              <span className="rounded bg-rose-500/20 px-2 py-0.5 text-xs font-semibold text-rose-300">
-                ❌ Error
-              </span>
-            ) : isOk ? (
-              <span className="rounded bg-emerald-500/20 px-2 py-0.5 text-xs font-semibold text-emerald-300">
-                ✓ Active
-              </span>
-            ) : isOtherUrl ? (
-              <span className="rounded bg-amber-500/20 px-2 py-0.5 text-xs font-semibold text-amber-300">
-                ⚠️ Wrong URL
-              </span>
-            ) : (
-              <span className="rounded bg-slate-500/20 px-2 py-0.5 text-xs font-semibold text-slate-300">
-                ○ Not configured
-              </span>
-            )}
-          </Row>
-          {info.error && <Row label="Error">{info.error}</Row>}
+        <div className="grid gap-3 rounded-card border border-white/5 bg-surface-2/30 p-4 text-[12px] sm:grid-cols-4">
+          <KV
+            label="Status"
+            value={
+              !info.ok ? (
+                <span className="chip chip-sell !text-[10px]">
+                  <Icon name="circle-x" size={10} />
+                  Error
+                </span>
+              ) : isOk ? (
+                <span className="chip chip-buy !text-[10px]">
+                  <span className="pulse-dot !h-1.5 !w-1.5" />
+                  Active
+                </span>
+              ) : isOtherUrl ? (
+                <span className="chip chip-warn !text-[10px]">
+                  <Icon name="alert-triangle" size={10} />
+                  Wrong URL
+                </span>
+              ) : (
+                <span className="chip chip-mute !text-[10px]">
+                  <Icon name="circle-x" size={10} />
+                  Not configured
+                </span>
+              )
+            }
+          />
           {info.url && (
-            <Row label="URL">
-              <code className="break-all text-xs text-slate-300">{info.url}</code>
-            </Row>
+            <KV label="URL" value={<code className="font-mono text-[11px] text-ink-secondary break-all">{info.url}</code>} span={3} />
           )}
           {typeof info.pending_update_count === "number" && (
-            <Row label="Pending updates">
-              <span className="tabular-nums text-slate-300">{info.pending_update_count}</span>
-            </Row>
+            <KV label="Pending updates" value={<span className="font-mono tabular text-ink-primary">{info.pending_update_count}</span>} />
           )}
-          {info.ip_address && <Row label="IP">{info.ip_address}</Row>}
+          {info.ip_address && <KV label="IP" value={<span className="font-mono text-ink-secondary">{info.ip_address}</span>} />}
           {info.allowed_updates && info.allowed_updates.length > 0 && (
-            <Row label="Allowed updates">
-              <span className="text-xs text-slate-300">{info.allowed_updates.join(", ")}</span>
-            </Row>
+            <KV label="Allowed" value={<span className="text-ink-secondary">{info.allowed_updates.join(", ")}</span>} />
           )}
-          {info.last_error_date && (
-            <>
-              <Row label="Last error time">
-                <span className="text-rose-300">
-                  {new Date(info.last_error_date * 1000).toLocaleString("en-GB", { hour12: false })}
-                </span>
-              </Row>
-              {info.last_error_message && (
-                <Row label="Last error">
-                  <span className="text-rose-300">{info.last_error_message}</span>
-                </Row>
-              )}
-            </>
+          {info.error && <KV label="Error" value={<span className="text-sig-sell">{info.error}</span>} span={4} />}
+          {info.last_error_message && (
+            <KV
+              label="Last error"
+              value={<span className="text-sig-sell text-[11px]">{info.last_error_message}</span>}
+              span={4}
+            />
           )}
         </div>
       )}
 
       {msg && (
         <p
-          className={`mt-3 rounded-md border px-3 py-2 text-xs ${
+          className={`mt-3 flex items-start gap-2 rounded-chip border px-3 py-2 text-[11px] ${
             msg.tone === "success"
-              ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-300"
-              : "border-rose-500/30 bg-rose-500/10 text-rose-300"
+              ? "border-sig-buy/30 bg-sig-buy/10 text-sig-buy"
+              : "border-sig-sell/30 bg-sig-sell/10 text-sig-sell"
           }`}
         >
+          <Icon
+            name={msg.tone === "success" ? "circle-check" : "alert-triangle"}
+            size={12}
+            className="mt-0.5"
+          />
           {msg.text}
         </p>
       )}
 
       {isOk && (
-        <details className="mt-3 text-xs text-slate-400">
-          <summary className="cursor-pointer hover:text-slate-300">
-            📋 วิธีให้ user ใหม่เริ่มใช้งาน
+        <details className="mt-3 text-[11px] text-ink-muted">
+          <summary className="cursor-pointer text-ink-secondary hover:text-ink-primary">
+            วิธีให้ user ใหม่เริ่มใช้งาน
           </summary>
           <ol className="mt-2 list-inside list-decimal space-y-1 pl-2">
-            <li>ผู้ใช้ค้นหา bot ใน Telegram และส่งข้อความ <code>/start</code></li>
+            <li>
+              ผู้ใช้ค้นหา bot ใน Telegram และส่งข้อความ{" "}
+              <code className="font-mono text-brand">/start</code>
+            </li>
             <li>Bot ตอบกลับพร้อม Chat ID + แจ้ง &quot;รอ admin อนุมัติ&quot;</li>
             <li>Contact คนนั้นจะปรากฏในตาราง &quot;Telegram contacts&quot; ด้านล่าง</li>
-            <li>คลิก <strong>➕ Create user</strong> เพื่อสร้าง user ให้</li>
+            <li>
+              คลิก{" "}
+              <strong className="text-sig-buy">+ Create user</strong> เพื่อสร้าง user ให้
+            </li>
             <li>ผู้ใช้ใช้ username ที่สร้างไว้ login ที่ /login</li>
           </ol>
         </details>
@@ -250,11 +263,20 @@ export default function TelegramWebhookPanel() {
   );
 }
 
-function Row({ label, children }: { label: string; children: React.ReactNode }) {
+function KV({
+  label,
+  value,
+  span,
+}: {
+  label: string;
+  value: React.ReactNode;
+  span?: number;
+}) {
+  const colSpan = span ? `sm:col-span-${span}` : "";
   return (
-    <div className="flex flex-wrap items-baseline gap-2">
-      <span className="w-32 shrink-0 text-xs uppercase tracking-wider text-slate-500">{label}</span>
-      <span>{children}</span>
+    <div className={`min-w-0 ${colSpan}`}>
+      <div className="eyebrow !text-[9px]">{label}</div>
+      <div className="mt-1">{value}</div>
     </div>
   );
 }

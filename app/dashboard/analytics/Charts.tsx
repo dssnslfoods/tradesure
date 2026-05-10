@@ -663,10 +663,10 @@ function ChartFrame({
   children: React.ReactNode;
 }) {
   return (
-    <div className="rounded-xl border border-crypto-border bg-crypto-panel p-4 shadow-lg">
-      <div className="mb-3 flex flex-wrap items-baseline justify-between gap-2">
-        <h3 className="text-sm font-semibold text-slate-200">{title}</h3>
-        {subtitle && <span className="text-xs text-slate-500">{subtitle}</span>}
+    <div className="card p-5">
+      <div className="mb-4 flex flex-wrap items-baseline justify-between gap-2">
+        <h3 className="text-[13px] font-semibold text-ink-primary">{title}</h3>
+        {subtitle && <span className="text-[11px] text-ink-muted">{subtitle}</span>}
       </div>
       {children}
     </div>
@@ -675,7 +675,7 @@ function ChartFrame({
 
 function EmptyChart({ label }: { label: string }) {
   return (
-    <div className="flex h-40 items-center justify-center rounded-xl border border-crypto-border bg-crypto-panel/50 text-xs text-slate-500">
+    <div className="card flex h-40 items-center justify-center text-[12px] text-ink-muted">
       {label}
     </div>
   );

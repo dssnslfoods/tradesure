@@ -218,17 +218,17 @@ function Kpi({
   tone?: "emerald" | "rose" | "amber" | "sky" | "slate";
 }) {
   const cls = {
-    emerald: "text-emerald-300",
-    rose: "text-rose-300",
-    amber: "text-amber-300",
-    sky: "text-sky-300",
-    slate: "text-slate-200",
+    emerald: "text-sig-buy",
+    rose: "text-sig-sell",
+    amber: "text-sig-warn",
+    sky: "text-sig-info",
+    slate: "text-ink-primary",
   }[tone];
   return (
-    <div className="rounded-lg border border-crypto-border bg-crypto-panel p-3">
-      <div className="text-[10px] uppercase tracking-wider text-slate-500">{label}</div>
-      <div className={`mt-1 text-xl font-semibold tabular-nums ${cls}`}>{value}</div>
-      {sub && <div className="text-[10px] text-slate-500">{sub}</div>}
+    <div className="card p-4">
+      <div className="eyebrow !text-[10px]">{label}</div>
+      <div className={`mt-1 text-[20px] font-bold tabular ${cls}`}>{value}</div>
+      {sub && <div className="text-[10px] text-ink-muted">{sub}</div>}
     </div>
   );
 }
@@ -240,34 +240,33 @@ function ByIntervalPanel({
 }) {
   const sorted = [...data].sort((a, b) => b.count - a.count);
   return (
-    <div className="rounded-xl border border-crypto-border bg-crypto-panel p-4 shadow-lg">
-      <div className="mb-3 flex flex-wrap items-baseline justify-between gap-2">
-        <h3 className="text-sm font-semibold text-slate-200">⏱ By timeframe</h3>
-        <span className="text-xs text-slate-500">{sorted.length} interval(s)</span>
+    <div className="card p-5">
+      <div className="mb-4 flex flex-wrap items-baseline justify-between gap-2">
+        <h3 className="text-[13px] font-semibold text-ink-primary">By timeframe</h3>
+        <span className="text-[11px] text-ink-muted">{sorted.length} interval(s)</span>
       </div>
       {sorted.length === 0 ? (
-        <div className="py-6 text-center text-xs text-slate-500">ยังไม่มีข้อมูล</div>
+        <div className="py-6 text-center text-[12px] text-ink-muted">ยังไม่มีข้อมูล</div>
       ) : (
-        <table className="w-full text-sm">
-          <thead className="text-left text-[10px] uppercase tracking-wider text-slate-500">
+        <table className="w-full text-[12px]">
+          <thead className="text-left">
             <tr>
-              <th className="py-2">Interval</th>
-              <th className="py-2 text-right">Trades</th>
-              <th className="py-2 text-right">Win rate</th>
-              <th className="py-2 text-right">Total PnL</th>
+              {["Interval","Trades","Win rate","Total PnL"].map((h, i) => (
+                <th key={h} className={`py-2 eyebrow !text-[10px] ${i > 0 ? "text-right" : ""}`}>{h}</th>
+              ))}
             </tr>
           </thead>
-          <tbody className="divide-y divide-crypto-border">
+          <tbody className="divide-y divide-white/5">
             {sorted.map((d) => (
               <tr key={d.interval}>
-                <td className="py-2 font-semibold text-slate-200">{d.interval}</td>
-                <td className="py-2 text-right tabular-nums text-slate-300">{d.count}</td>
-                <td className="py-2 text-right tabular-nums text-slate-300">
+                <td className="py-2.5 font-semibold text-ink-primary">{d.interval}</td>
+                <td className="py-2.5 text-right tabular text-ink-secondary">{d.count}</td>
+                <td className="py-2.5 text-right tabular text-ink-secondary">
                   {d.winRate === null ? "-" : `${d.winRate}%`}
                 </td>
                 <td
-                  className={`py-2 text-right tabular-nums font-semibold ${
-                    d.totalPnl >= 0 ? "text-emerald-300" : "text-rose-300"
+                  className={`py-2.5 text-right tabular font-semibold ${
+                    d.totalPnl >= 0 ? "text-sig-buy" : "text-sig-sell"
                   }`}
                 >
                   {d.totalPnl >= 0 ? "+" : ""}

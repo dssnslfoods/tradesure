@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 import { getScheduleConfig, listRecentRuns } from "@/lib/schedule/settings";
 import { getCurrentUser } from "@/lib/auth/guards";
 import ScheduleControls from "./ScheduleControls";
+import Icon, { type IconName } from "@/components/ui/Icon";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -19,10 +20,9 @@ function fmtDuration(ms: number | null) {
 }
 
 function triggerBadge(t: string) {
-  const base = "rounded px-2 py-0.5 text-xs font-semibold uppercase";
-  if (t === "manual") return `${base} bg-crypto-accent/20 text-amber-300`;
-  if (t === "cron") return `${base} bg-sky-500/20 text-sky-300`;
-  return `${base} bg-slate-500/20 text-slate-300`;
+  if (t === "manual") return "chip-warn";
+  if (t === "cron") return "chip-info";
+  return "chip-mute";
 }
 
 export default async function SchedulePage() {
@@ -73,75 +73,73 @@ export default async function SchedulePage() {
         </div>
       </header>
 
-      <section className="mb-8 grid grid-cols-2 gap-3 sm:grid-cols-4">
-        <Stat label="Cron runs (recent)" value={String(cronRuns)} />
-        <Stat label="Total evaluated" value={String(totalEvaluated)} />
-        <Stat
+      <section className="mb-7 grid grid-cols-2 gap-3 sm:grid-cols-4">
+        <MiniStat label="Cron runs (recent)" value={String(cronRuns)} icon="refresh" />
+        <MiniStat label="Total evaluated" value={String(totalEvaluated)} icon="device-analytics" />
+        <MiniStat
           label="Errors (recent)"
           value={String(errorRuns)}
-          accent={errorRuns > 0 ? "rose" : "slate"}
+          tone={errorRuns > 0 ? "sell" : "neutral"}
+          icon="alert-triangle"
         />
-        <Stat
+        <MiniStat
           label="Display interval"
           value={`${config.interval_minutes} min`}
+          icon="clock"
         />
       </section>
 
       <ScheduleControls config={config} />
 
-      <section className="mt-10">
-        <h2 className="mb-3 text-lg font-semibold">Recent runs</h2>
-        <div className="overflow-hidden rounded-xl border border-crypto-border bg-crypto-panel">
+      <section className="mt-7">
+        <div className="mb-3 flex items-center gap-2">
+          <Icon name="history" size={14} className="text-ink-secondary" />
+          <h2 className="text-[15px] font-semibold text-ink-primary">Recent runs</h2>
+          <span className="ml-1 text-[11px] text-ink-muted">({runs.length})</span>
+        </div>
+        <div className="card overflow-hidden">
           <div className="overflow-x-auto">
-            <table className="min-w-full divide-y divide-crypto-border text-sm">
-              <thead className="bg-black/30 text-left text-xs uppercase tracking-wider text-slate-400">
+            <table className="min-w-full divide-y divide-white/5 text-[12px]">
+              <thead className="bg-surface-2/40 text-left">
                 <tr>
-                  <th className="px-4 py-3">Time</th>
-                  <th className="px-4 py-3">Trigger</th>
-                  <th className="px-4 py-3">Evaluated</th>
-                  <th className="px-4 py-3">W / L / O</th>
-                  <th className="px-4 py-3">Win rate</th>
-                  <th className="px-4 py-3">Duration</th>
-                  <th className="px-4 py-3">Error</th>
+                  {["Time","Trigger","Evaluated","W / L / O","Win rate","Duration","Error"].map(h => (
+                    <th key={h} className="px-4 py-3 eyebrow !text-[10px]">{h}</th>
+                  ))}
                 </tr>
               </thead>
-              <tbody className="divide-y divide-crypto-border">
+              <tbody className="divide-y divide-white/5">
                 {runs.length === 0 && (
                   <tr>
-                    <td colSpan={7} className="px-4 py-12 text-center text-slate-500">
+                    <td colSpan={7} className="px-4 py-12 text-center text-ink-muted">
                       ยังไม่มีการรัน — รอ Cloud Scheduler หรือกดปุ่ม Run backtest now
                     </td>
                   </tr>
                 )}
                 {runs.map((r) => (
-                  <tr key={r.id} className="hover:bg-black/20">
-                    <td className="whitespace-nowrap px-4 py-3 text-slate-300">
+                  <tr key={r.id} className="hover:bg-surface-2/30">
+                    <td className="whitespace-nowrap px-4 py-3 font-mono text-ink-secondary">
                       {fmtTime(r.created_at)}
                     </td>
                     <td className="whitespace-nowrap px-4 py-3">
-                      <span className={triggerBadge(r.triggered_by)}>
+                      <span className={`chip ${triggerBadge(r.triggered_by)} !text-[10px]`}>
                         {r.triggered_by}
                       </span>
                     </td>
-                    <td className="whitespace-nowrap px-4 py-3 tabular-nums">
-                      {r.evaluated}
+                    <td className="whitespace-nowrap px-4 py-3 tabular text-ink-primary">{r.evaluated}</td>
+                    <td className="whitespace-nowrap px-4 py-3 tabular">
+                      <span className="text-sig-buy">{r.win}</span>
+                      <span className="text-ink-faint"> / </span>
+                      <span className="text-sig-sell">{r.loss}</span>
+                      <span className="text-ink-faint"> / </span>
+                      <span className="text-sig-info">{r.open}</span>
                     </td>
-                    <td className="whitespace-nowrap px-4 py-3 tabular-nums">
-                      <span className="text-emerald-400">{r.win}</span>
-                      {" / "}
-                      <span className="text-rose-400">{r.loss}</span>
-                      {" / "}
-                      <span className="text-sky-400">{r.open}</span>
-                    </td>
-                    <td className="whitespace-nowrap px-4 py-3 tabular-nums">
+                    <td className="whitespace-nowrap px-4 py-3 tabular text-ink-secondary">
                       {r.win_rate_pct === null ? "-" : `${r.win_rate_pct}%`}
                     </td>
-                    <td className="whitespace-nowrap px-4 py-3 tabular-nums text-slate-400">
+                    <td className="whitespace-nowrap px-4 py-3 tabular text-ink-muted">
                       {fmtDuration(r.duration_ms)}
                     </td>
-                    <td className="px-4 py-3 text-rose-300">
-                      {r.error ?? ""}
-                    </td>
+                    <td className="px-4 py-3 text-sig-sell text-[11px]">{r.error ?? ""}</td>
                   </tr>
                 ))}
               </tbody>
@@ -150,47 +148,69 @@ export default async function SchedulePage() {
         </div>
       </section>
 
-      <section className="mt-8 rounded-xl border border-crypto-border bg-crypto-panel/60 p-4 text-xs text-slate-400">
-        <p className="font-semibold text-slate-300">Cloud Scheduler info</p>
-        <p className="mt-2">
-          ความถี่จริงของการรันถูกควบคุมโดย Cloud Scheduler ที่:
+      <section className="card mt-6 p-5 text-[12px] text-ink-secondary">
+        <div className="flex items-center gap-2">
+          <Icon name="info" size={14} className="text-sig-info" />
+          <span className="font-semibold text-ink-primary">Cloud Scheduler info</span>
+        </div>
+        <p className="mt-2 text-ink-muted">
+          ความถี่จริงของการรันถูกควบคุมโดย Cloud Scheduler.
         </p>
         <a
           href="https://console.cloud.google.com/cloudscheduler?project=tradesure-800aa"
           target="_blank"
           rel="noreferrer"
-          className="mt-2 inline-block text-emerald-300 hover:underline"
+          className="mt-2 inline-flex items-center gap-1.5 text-brand hover:underline"
         >
-          → Open Cloud Scheduler in Google Cloud Console
+          <Icon name="external" size={12} />
+          Open in Google Cloud Console
         </a>
-        <p className="mt-2">
-          การกด Pause ที่นี่จะทำให้ endpoint ตอบ <code>{`{ ok: true, skipped: true }`}</code>{" "}
-          ทันที โดยไม่ทำงานจริง — Cloud Scheduler ไม่ต้องหยุด
+        <p className="mt-2 text-ink-muted">
+          การกด Pause ที่นี่จะทำให้ endpoint ตอบ{" "}
+          <code className="font-mono text-brand">{`{ ok: true, skipped: true }`}</code>{" "}
+          ทันที — Cloud Scheduler ไม่ต้องหยุด
         </p>
       </section>
     </>
   );
 }
 
-function Stat({
+function MiniStat({
   label,
   value,
-  accent = "slate",
+  tone = "neutral",
+  icon,
 }: {
   label: string;
   value: string;
-  accent?: "emerald" | "rose" | "sky" | "slate";
+  tone?: "neutral" | "buy" | "sell" | "warn" | "info";
+  icon?: IconName;
 }) {
-  const tone = {
-    emerald: "text-emerald-300",
-    rose: "text-rose-300",
-    sky: "text-sky-300",
-    slate: "text-slate-200",
-  }[accent];
+  const cls = {
+    neutral: "text-ink-primary",
+    buy: "text-sig-buy",
+    sell: "text-sig-sell",
+    warn: "text-sig-warn",
+    info: "text-sig-info",
+  }[tone];
+  const iconBg = {
+    neutral: "bg-surface-2 text-ink-secondary",
+    buy: "bg-sig-buy/15 text-sig-buy",
+    sell: "bg-sig-sell/15 text-sig-sell",
+    warn: "bg-sig-warn/15 text-sig-warn",
+    info: "bg-sig-info/15 text-sig-info",
+  }[tone];
   return (
-    <div className="rounded-lg border border-crypto-border bg-crypto-panel p-3">
-      <div className="text-[10px] uppercase tracking-wider text-slate-500">{label}</div>
-      <div className={`mt-1 text-xl font-semibold tabular-nums ${tone}`}>{value}</div>
+    <div className="card flex items-center gap-3 p-4">
+      {icon && (
+        <span className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-chip ${iconBg}`}>
+          <Icon name={icon} size={16} />
+        </span>
+      )}
+      <div className="min-w-0">
+        <div className="eyebrow !text-[10px]">{label}</div>
+        <div className={`mt-1 text-[18px] font-bold tabular ${cls}`}>{value}</div>
+      </div>
     </div>
   );
 }

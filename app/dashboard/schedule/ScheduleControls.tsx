@@ -3,6 +3,7 @@
 import { useState, useTransition } from "react";
 import { setEnabled, setIntervalMinutes, triggerRunNow } from "./actions";
 import type { BacktestScheduleConfig } from "@/lib/schedule/settings";
+import Icon from "@/components/ui/Icon";
 
 export default function ScheduleControls({ config }: { config: BacktestScheduleConfig }) {
   const [pending, start] = useTransition();
@@ -21,25 +22,23 @@ export default function ScheduleControls({ config }: { config: BacktestScheduleC
     });
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-4">
       {/* Enable / Pause */}
-      <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-crypto-border bg-crypto-panel p-4">
+      <div className="card flex flex-wrap items-center justify-between gap-3 p-5">
         <div>
-          <div className="text-sm font-semibold">
-            Status:{" "}
-            {config.enabled ? (
-              <span className="text-emerald-400">● Active</span>
-            ) : (
-              <span className="text-rose-400">● Paused</span>
-            )}
+          <div className="flex items-center gap-2">
+            <span className={`pulse-dot ${config.enabled ? "" : "!bg-sig-sell"}`} />
+            <span className="text-[14px] font-semibold text-ink-primary">
+              {config.enabled ? "Active" : "Paused"}
+            </span>
           </div>
           {!config.enabled && config.paused_reason && (
-            <p className="mt-1 text-xs text-slate-400">
-              Reason: {config.paused_reason}
+            <p className="mt-1 text-[11px] text-ink-muted">
+              Reason: <span className="text-ink-secondary">{config.paused_reason}</span>
             </p>
           )}
         </div>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
           {config.enabled ? (
             <>
               <input
@@ -47,33 +46,35 @@ export default function ScheduleControls({ config }: { config: BacktestScheduleC
                 value={reason}
                 onChange={(e) => setReason(e.target.value)}
                 placeholder="Pause reason (optional)"
-                className="rounded border border-crypto-border bg-black/40 px-3 py-2 text-sm placeholder-slate-500"
+                className="h-9 rounded-chip border border-white/5 bg-surface-2/60 px-3 text-[13px] text-ink-primary placeholder:text-ink-faint"
               />
               <button
                 disabled={pending}
                 onClick={() => safeRun(() => setEnabled(false, reason || null))}
-                className="rounded-lg bg-rose-500/20 border border-rose-500/40 px-4 py-2 text-sm font-semibold text-rose-200 hover:bg-rose-500/30 disabled:opacity-60"
+                className="btn !bg-sig-sell/15 !text-sig-sell !border-sig-sell/30 hover:!bg-sig-sell/25 disabled:opacity-60"
               >
-                Pause schedule
+                <Icon name="pause" size={12} />
+                Pause
               </button>
             </>
           ) : (
             <button
               disabled={pending}
               onClick={() => safeRun(() => setEnabled(true))}
-              className="rounded-lg bg-emerald-500/20 border border-emerald-500/40 px-4 py-2 text-sm font-semibold text-emerald-200 hover:bg-emerald-500/30 disabled:opacity-60"
+              className="btn btn-primary disabled:opacity-60"
             >
-              Resume schedule
+              <Icon name="play" size={12} />
+              Resume
             </button>
           )}
         </div>
       </div>
 
       {/* Interval */}
-      <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-crypto-border bg-crypto-panel p-4">
+      <div className="card flex flex-wrap items-center justify-between gap-3 p-5">
         <div>
-          <div className="text-sm font-semibold">Display interval</div>
-          <p className="mt-1 text-xs text-slate-400">
+          <div className="text-[14px] font-semibold text-ink-primary">Display interval</div>
+          <p className="mt-1 text-[11px] text-ink-muted">
             ตัวเลขนี้เป็นเพียงข้อมูลแสดง — ความถี่จริงตั้งจาก Cloud Scheduler
           </p>
         </div>
@@ -84,13 +85,13 @@ export default function ScheduleControls({ config }: { config: BacktestScheduleC
             max={1440}
             value={interval}
             onChange={(e) => setIntervalState(Number(e.target.value))}
-            className="w-20 rounded border border-crypto-border bg-black/40 px-3 py-2 text-sm tabular-nums"
+            className="h-9 w-20 rounded-chip border border-white/5 bg-surface-2/60 px-3 font-mono text-[13px] tabular text-ink-primary"
           />
-          <span className="text-sm text-slate-400">min</span>
+          <span className="text-[12px] text-ink-muted">min</span>
           <button
             disabled={pending || interval === config.interval_minutes}
             onClick={() => safeRun(() => setIntervalMinutes(interval))}
-            className="rounded-lg border border-crypto-border bg-crypto-panel px-4 py-2 text-sm font-semibold text-slate-200 hover:bg-black/30 disabled:opacity-60"
+            className="btn btn-secondary disabled:opacity-50"
           >
             Save
           </button>
@@ -98,10 +99,10 @@ export default function ScheduleControls({ config }: { config: BacktestScheduleC
       </div>
 
       {/* Run now */}
-      <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-crypto-border bg-crypto-panel p-4">
+      <div className="card flex flex-wrap items-center justify-between gap-3 p-5">
         <div>
-          <div className="text-sm font-semibold">Manual trigger</div>
-          <p className="mt-1 text-xs text-slate-400">
+          <div className="text-[14px] font-semibold text-ink-primary">Manual trigger</div>
+          <p className="mt-1 text-[11px] text-ink-muted">
             กดเพื่อรัน backtest ทันที (จะ override pause flag)
           </p>
         </div>
@@ -122,20 +123,25 @@ export default function ScheduleControls({ config }: { config: BacktestScheduleC
                 setMsg(`Error: ${data.error}`);
               } else {
                 setMsg(
-                  `✓ Ran: evaluated ${data?.evaluated ?? 0} · ${data?.win ?? 0}W / ${
+                  `Ran: evaluated ${data?.evaluated ?? 0} · ${data?.win ?? 0}W / ${
                     data?.loss ?? 0
                   }L / ${data?.open ?? 0}O · win-rate ${data?.win_rate_pct ?? "-"}%`
                 );
               }
             })
           }
-          className="rounded-lg bg-crypto-accent px-5 py-2 text-sm font-semibold text-black hover:opacity-90 disabled:opacity-60"
+          className="btn btn-primary disabled:opacity-60"
         >
+          <Icon name="lightning" size={14} />
           {pending ? "Running…" : "Run backtest now"}
         </button>
       </div>
 
-      {msg && <p className="text-xs text-slate-300">{msg}</p>}
+      {msg && (
+        <p className="rounded-chip border border-white/5 bg-surface-1 px-3 py-2 text-[12px] text-ink-secondary">
+          {msg}
+        </p>
+      )}
     </div>
   );
 }

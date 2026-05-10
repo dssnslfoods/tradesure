@@ -3,6 +3,7 @@
 import { useEffect, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { updateSignalLevels } from "./actions";
+import Icon from "@/components/ui/Icon";
 
 interface InitialLevels {
   analysisId: string;
@@ -62,17 +63,13 @@ export default function EditLevelsModal({
       setErr("กรุณากรอก SL, TP1, TP2 เป็นตัวเลขมากกว่า 0");
       return;
     }
-    // Optional sanity check by bias
-    if (initial.bias === "LONG") {
-      if (!(slN < tp1N && tp1N < tp2N)) {
-        setErr("LONG: ต้องเป็น SL < TP1 < TP2");
-        return;
-      }
-    } else if (initial.bias === "SHORT") {
-      if (!(slN > tp1N && tp1N > tp2N)) {
-        setErr("SHORT: ต้องเป็น SL > TP1 > TP2");
-        return;
-      }
+    if (initial.bias === "LONG" && !(slN < tp1N && tp1N < tp2N)) {
+      setErr("LONG: ต้องเป็น SL < TP1 < TP2");
+      return;
+    }
+    if (initial.bias === "SHORT" && !(slN > tp1N && tp1N > tp2N)) {
+      setErr("SHORT: ต้องเป็น SL > TP1 > TP2");
+      return;
     }
     startTransition(async () => {
       const res = await updateSignalLevels(initial.analysisId, {
@@ -91,7 +88,6 @@ export default function EditLevelsModal({
     });
   };
 
-  // Compute live R:R and % from entry mid for visual feedback
   const slN = parse(sl);
   const tp1N = parse(tp1);
   const tp2N = parse(tp2);
@@ -99,109 +95,130 @@ export default function EditLevelsModal({
     parse(entryLow) !== null && parse(entryHigh) !== null
       ? (parse(entryLow)! + parse(entryHigh)!) / 2
       : null;
+  const rrTp1 = entryMidN && slN && tp1N
+    ? Math.abs(tp1N - entryMidN) / Math.abs(entryMidN - slN)
+    : null;
+  const rrTp2 = entryMidN && slN && tp2N
+    ? Math.abs(tp2N - entryMidN) / Math.abs(entryMidN - slN)
+    : null;
 
-  const rrTp1 =
-    entryMidN && slN && tp1N
-      ? Math.abs(tp1N - entryMidN) / Math.abs(entryMidN - slN)
-      : null;
-  const rrTp2 =
-    entryMidN && slN && tp2N
-      ? Math.abs(tp2N - entryMidN) / Math.abs(entryMidN - slN)
-      : null;
+  const biasChip =
+    initial.bias === "LONG"
+      ? "chip-buy"
+      : initial.bias === "SHORT"
+      ? "chip-sell"
+      : "chip-warn";
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm"
       onClick={onClose}
     >
       <div
-        className="w-full max-w-md rounded-2xl border border-crypto-border bg-crypto-panel p-6 shadow-2xl"
+        className="card glass relative w-full max-w-md p-6"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="mb-4 flex items-start justify-between">
+        <div className="mb-5 flex items-start justify-between">
           <div>
-            <h2 className="text-lg font-bold">แก้ไขระดับราคา</h2>
-            <p className="text-xs text-slate-400">
-              {initial.symbol} ·{" "}
-              <span
-                className={
-                  initial.bias === "LONG"
-                    ? "text-emerald-300"
-                    : initial.bias === "SHORT"
-                    ? "text-rose-300"
-                    : "text-slate-300"
-                }
-              >
+            <div className="eyebrow">Edit signal levels</div>
+            <h2 className="mt-1 flex items-center gap-2 text-[18px] font-bold tracking-tightest text-ink-primary">
+              {initial.symbol}
+              <span className={`chip !text-[10px] !py-0.5 !px-1.5 ${biasChip}`}>
                 {initial.bias ?? "-"}
               </span>
-            </p>
+            </h2>
           </div>
           <button
             type="button"
             onClick={onClose}
-            className="text-slate-400 hover:text-slate-200"
+            className="text-ink-muted hover:text-ink-primary"
             aria-label="Close"
           >
-            ✕
+            <Icon name="x" size={18} />
           </button>
         </div>
 
-        <form onSubmit={onSave} className="space-y-3">
+        <form onSubmit={onSave} className="space-y-4">
           <div className="grid grid-cols-2 gap-3">
             <Field label="Entry low" value={entryLow} onChange={setEntryLow} placeholder="optional" />
             <Field label="Entry high" value={entryHigh} onChange={setEntryHigh} placeholder="optional" />
           </div>
-          <Field label="🛑 Stop Loss" value={sl} onChange={setSl} required tone="rose" />
-          <Field label="✅ Take Profit 1" value={tp1} onChange={setTp1} required tone="emerald" />
-          <Field label="✅ Take Profit 2" value={tp2} onChange={setTp2} required tone="emerald" />
+          <Field
+            label="Stop Loss"
+            value={sl}
+            onChange={setSl}
+            required
+            tone="sell"
+            icon="alert-triangle"
+          />
+          <Field
+            label="Take Profit 1"
+            value={tp1}
+            onChange={setTp1}
+            required
+            tone="buy"
+            icon="target"
+          />
+          <Field
+            label="Take Profit 2"
+            value={tp2}
+            onChange={setTp2}
+            required
+            tone="buy"
+            icon="target"
+          />
 
           {(rrTp1 !== null || rrTp2 !== null) && (
-            <div className="rounded-md border border-crypto-border bg-black/30 p-3 text-xs">
-              <div className="mb-1 font-semibold text-slate-300">Live preview</div>
-              {rrTp1 !== null && (
-                <div className="flex justify-between text-slate-400">
-                  <span>R:R (TP1):</span>
-                  <span className={rrTp1 >= 1.5 ? "text-emerald-300" : "text-amber-300"}>
-                    {rrTp1.toFixed(2)}:1
-                  </span>
-                </div>
-              )}
-              {rrTp2 !== null && (
-                <div className="flex justify-between text-slate-400">
-                  <span>R:R (TP2):</span>
-                  <span className={rrTp2 >= 2 ? "text-emerald-300" : "text-amber-300"}>
-                    {rrTp2.toFixed(2)}:1
-                  </span>
-                </div>
-              )}
+            <div className="rounded-card border border-white/5 bg-surface-2/40 p-3">
+              <div className="mb-1.5 eyebrow !text-[10px]">Live preview</div>
+              <div className="grid grid-cols-2 gap-3 text-[12px]">
+                {rrTp1 !== null && (
+                  <div className="flex items-center justify-between">
+                    <span className="text-ink-muted">R:R (TP1)</span>
+                    <span
+                      className={`font-mono font-semibold tabular ${
+                        rrTp1 >= 1.5 ? "text-sig-buy" : "text-sig-warn"
+                      }`}
+                    >
+                      {rrTp1.toFixed(2)}:1
+                    </span>
+                  </div>
+                )}
+                {rrTp2 !== null && (
+                  <div className="flex items-center justify-between">
+                    <span className="text-ink-muted">R:R (TP2)</span>
+                    <span
+                      className={`font-mono font-semibold tabular ${
+                        rrTp2 >= 2 ? "text-sig-buy" : "text-sig-warn"
+                      }`}
+                    >
+                      {rrTp2.toFixed(2)}:1
+                    </span>
+                  </div>
+                )}
+              </div>
             </div>
           )}
 
           {err && (
-            <p className="rounded-md border border-rose-500/30 bg-rose-500/10 px-3 py-2 text-xs text-rose-300">
+            <p className="flex items-start gap-2 rounded-chip border border-sig-sell/30 bg-sig-sell/10 px-3 py-2 text-[11px] text-sig-sell">
+              <Icon name="alert-triangle" size={12} className="mt-0.5" />
               {err}
             </p>
           )}
 
-          <p className="text-xs text-slate-500">
-            ⚠️ การบันทึกจะ reset outcome เป็น PENDING — รอบ backtest ถัดไปจะคำนวณใหม่ด้วยค่านี้
+          <p className="flex items-start gap-2 text-[11px] text-ink-muted">
+            <Icon name="info" size={12} className="mt-0.5" />
+            การบันทึกจะ reset outcome เป็น PENDING — backtest รอบถัดไปจะคำนวณใหม่
           </p>
 
           <div className="flex justify-end gap-2 pt-2">
-            <button
-              type="button"
-              onClick={onClose}
-              disabled={pending}
-              className="rounded-lg border border-crypto-border bg-black/30 px-4 py-2 text-sm text-slate-300 hover:bg-black/50 disabled:opacity-40"
-            >
+            <button type="button" onClick={onClose} disabled={pending} className="btn btn-ghost">
               ยกเลิก
             </button>
-            <button
-              type="submit"
-              disabled={pending}
-              className="rounded-lg bg-crypto-accent px-4 py-2 text-sm font-semibold text-black hover:opacity-90 disabled:opacity-40"
-            >
-              {pending ? "กำลังบันทึก…" : "💾 บันทึก"}
+            <button type="submit" disabled={pending} className="btn btn-primary">
+              <Icon name="check" size={14} />
+              {pending ? "กำลังบันทึก…" : "บันทึก"}
             </button>
           </div>
         </form>
@@ -217,25 +234,31 @@ function Field({
   placeholder,
   required,
   tone,
+  icon,
 }: {
   label: string;
   value: string;
   onChange: (v: string) => void;
   placeholder?: string;
   required?: boolean;
-  tone?: "rose" | "emerald";
+  tone?: "buy" | "sell";
+  icon?: "alert-triangle" | "target";
 }) {
   const accent =
-    tone === "rose"
-      ? "focus:border-rose-500"
-      : tone === "emerald"
-      ? "focus:border-emerald-500"
-      : "focus:border-crypto-accent";
+    tone === "sell"
+      ? "focus:border-sig-sell/60"
+      : tone === "buy"
+      ? "focus:border-sig-buy/60"
+      : "focus:border-brand/40";
+  const iconColor =
+    tone === "sell" ? "text-sig-sell" : tone === "buy" ? "text-sig-buy" : "";
   return (
-    <div>
-      <label className="mb-1 block text-xs font-medium text-slate-400">
-        {label} {required ? <span className="text-rose-400">*</span> : null}
-      </label>
+    <label className="block">
+      <div className="mb-1.5 flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-eyebrow text-ink-muted">
+        {icon && <Icon name={icon} size={11} className={iconColor} />}
+        {label}
+        {required && <span className="text-sig-sell">*</span>}
+      </div>
       <input
         type="number"
         step="any"
@@ -243,8 +266,8 @@ function Field({
         value={value}
         onChange={(e) => onChange(e.target.value)}
         placeholder={placeholder}
-        className={`w-full rounded-lg border border-crypto-border bg-black/40 px-3 py-2 tabular-nums text-slate-100 placeholder-slate-600 focus:outline-none ${accent}`}
+        className={`h-10 w-full rounded-chip border border-white/5 bg-surface-2/60 px-3 font-mono tabular text-[13px] text-ink-primary placeholder:text-ink-faint ${accent}`}
       />
-    </div>
+    </label>
   );
 }
