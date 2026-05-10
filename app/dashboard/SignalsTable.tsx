@@ -87,7 +87,7 @@ const COLUMN_INFO: Record<
   },
   Outcome: {
     full: "Backtest outcome",
-    desc: "ผลจาก Binance klines: PENDING / OPEN / WIN_TP1 / WIN_TP2 / LOSS_SL / SKIP_WAIT / NO_DATA",
+    desc: "ผลจาก Binance klines: PENDING (รอประเมิน) / OPEN (ค้าง) / WIN_TP1 / WIN_TP2 / LOSS_SL / No Trade (AI ไม่แนะนำ) / NO_DATA",
   },
   PnL: {
     full: "Profit / Loss (%)",
@@ -233,7 +233,7 @@ function outcomeBadge(o: string | null) {
     case "PENDING":
       return `${base} bg-slate-500/20 text-slate-300 border border-slate-500/40`;
     case "SKIP_WAIT":
-      return `${base} bg-amber-500/15 text-amber-300 border border-amber-500/40`;
+      return `${base} bg-amber-500/20 text-amber-200 border border-amber-500/50`;
     case "NO_DATA":
     case "ERROR":
       return `${base} bg-zinc-500/20 text-zinc-300 border border-zinc-500/40`;
@@ -249,7 +249,7 @@ function outcomeLabel(o: string | null): string {
   if (o === "LOSS_SL") return "❌ SL";
   if (o === "OPEN") return "⏳ OPEN";
   if (o === "PENDING") return "🕒 Pending";
-  if (o === "SKIP_WAIT") return "⏭ Wait";
+  if (o === "SKIP_WAIT") return "⛔ No Trade";
   if (o === "NO_DATA") return "—";
   return o;
 }
