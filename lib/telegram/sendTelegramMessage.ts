@@ -93,17 +93,45 @@ export function buildTelegramMessage(
 
   const isWait = ai.bias === "WAIT";
 
+  // ============= WAIT message: clear NO TRADE banner, no levels =============
+  if (isWait) {
+    const lines: string[] = [
+      "⛔ <b>NO TRADE — ไม่แนะนำให้เข้า</b>",
+      "━━━━━━━━━━━━━━━━━━━━",
+      "",
+      `เหรียญ: <b>${escapeHtml(payload.symbol)}</b>`,
+      `Timeframe: <b>${escapeHtml(payload.interval)}</b>`,
+      `Signal จาก TradingView: <b>${escapeHtml(payload.signal)}</b>`,
+      `ราคาปัจจุบัน: <b>${escapeHtml(fmtPrice(payload.price))}</b>`,
+      "",
+      "📊 <b>มุมมอง AI: WAIT</b>",
+      `ความมั่นใจ: <b>${ai.confidence}%</b>`,
+      `ความเสี่ยง: <b>${escapeHtml(ai.risk_level)}</b>`,
+      "",
+      "🚫 <b>เหตุผลที่ไม่แนะนำ:</b>",
+      escapeHtml(ai.summary_th),
+      "",
+      "📝 <b>รายละเอียด:</b>",
+      escapeHtml(ai.reasoning_th),
+      "",
+      "💡 <i>รอสัญญาณที่ชัดเจนกว่านี้</i>",
+      "",
+      "━━━━━━━━━━━━━━━━━━━━",
+      "⚠️ <i>หมายเหตุ: ข้อมูลนี้เป็นเพียงการวิเคราะห์เพื่อประกอบการตัดสินใจ ไม่ใช่คำแนะนำทางการเงิน</i>",
+    ];
+    return lines.join("\n");
+  }
+
+  // ============= LONG/SHORT message: full trade plan =============
   const lines: string[] = [
-    isWait
-      ? "⏸️ <b>Crypto AI Signal Alert — WAIT</b>"
-      : "🚨 <b>Crypto AI Signal Alert</b>",
+    "🚨 <b>Crypto AI Signal Alert</b>",
     "",
     `เหรียญ: <b>${escapeHtml(payload.symbol)}</b>`,
     `Timeframe: <b>${escapeHtml(payload.interval)}</b>`,
     `Signal จาก TradingView: <b>${escapeHtml(payload.signal)}</b>`,
     `ราคา: <b>${escapeHtml(fmtPrice(payload.price))}</b>`,
     "",
-    `📊 มุมมอง AI: <b>${escapeHtml(ai.bias)}</b>${isWait ? "  ⚠️ <i>ไม่แนะนำให้เข้า</i>" : ""}`,
+    `📊 มุมมอง AI: <b>${escapeHtml(ai.bias)}</b>`,
     `ความมั่นใจ: <b>${ai.confidence}%</b>`,
     `ความเสี่ยง: <b>${escapeHtml(ai.risk_level)}</b>`,
   ];
