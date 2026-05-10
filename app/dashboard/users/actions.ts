@@ -93,6 +93,113 @@ export async function setUserAdmin(userId: string, isAdmin: boolean) {
   return { ok: true };
 }
 
+// =====================================================
+// Telegram bot webhook management
+// =====================================================
+
+export interface TelegramWebhookInfo {
+  ok: boolean;
+  url?: string;
+  has_custom_certificate?: boolean;
+  pending_update_count?: number;
+  last_error_date?: number;
+  last_error_message?: string;
+  last_synchronization_error_date?: number;
+  max_connections?: number;
+  ip_address?: string;
+  allowed_updates?: string[];
+  error?: string;
+}
+
+function getBotToken(): string {
+  const t = process.env.TELEGRAM_BOT_TOKEN;
+  if (!t) throw new Error("TELEGRAM_BOT_TOKEN not configured");
+  return t;
+}
+
+function getWebhookSecret(): string | null {
+  return process.env.TELEGRAM_WEBHOOK_SECRET ?? null;
+}
+
+function getSiteUrl(): string {
+  return (
+    process.env.NEXT_PUBLIC_SITE_URL ??
+    process.env.URL ??
+    "https://tradesure.d2infinite.com"
+  );
+}
+
+export async function getTelegramWebhookInfo(): Promise<TelegramWebhookInfo> {
+  const guard = await requireAdmin();
+  if (!guard.ok) return { ok: false, error: guard.error };
+
+  try {
+    const token = getBotToken();
+    const res = await fetch(`https://api.telegram.org/bot${token}/getWebhookInfo`, {
+      cache: "no-store",
+    });
+    const data = (await res.json()) as { ok: boolean; result?: Record<string, unknown>; description?: string };
+    if (!data.ok || !data.result) {
+      return { ok: false, error: data.description ?? "Telegram returned not ok" };
+    }
+    return { ok: true, ...(data.result as Omit<TelegramWebhookInfo, "ok">) };
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : "unknown" };
+  }
+}
+
+export async function setTelegramWebhook(): Promise<{ ok: boolean; url?: string; error?: string }> {
+  const guard = await requireAdmin();
+  if (!guard.ok) return guard;
+
+  try {
+    const token = getBotToken();
+    const secret = getWebhookSecret();
+    const url = `${getSiteUrl()}/api/telegram/bot`;
+
+    const body: Record<string, unknown> = {
+      url,
+      allowed_updates: ["message"],
+      drop_pending_updates: false,
+    };
+    if (secret) body.secret_token = secret;
+
+    const res = await fetch(`https://api.telegram.org/bot${token}/setWebhook`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+      cache: "no-store",
+    });
+    const data = (await res.json()) as { ok: boolean; description?: string };
+    if (!data.ok) return { ok: false, error: data.description ?? "Telegram returned not ok" };
+    revalidatePath("/dashboard/users");
+    return { ok: true, url };
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : "unknown" };
+  }
+}
+
+export async function deleteTelegramWebhook(): Promise<{ ok: boolean; error?: string }> {
+  const guard = await requireAdmin();
+  if (!guard.ok) return guard;
+
+  try {
+    const token = getBotToken();
+    const res = await fetch(`https://api.telegram.org/bot${token}/deleteWebhook`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ drop_pending_updates: false }),
+      cache: "no-store",
+    });
+    const data = (await res.json()) as { ok: boolean; description?: string };
+    if (!data.ok) return { ok: false, error: data.description ?? "Telegram returned not ok" };
+    revalidatePath("/dashboard/users");
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : "unknown" };
+  }
+}
+
 export async function deleteContact(contactId: string) {
   const guard = await requireAdmin();
   if (!guard.ok) return guard;

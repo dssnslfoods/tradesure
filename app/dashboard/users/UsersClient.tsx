@@ -9,6 +9,7 @@ import {
   setUserAdmin,
 } from "./actions";
 import type { UserRow, ContactRow } from "./page";
+import TelegramWebhookPanel from "./TelegramWebhookPanel";
 
 function fmtTime(iso: string | null) {
   if (!iso) return "-";
@@ -39,6 +40,8 @@ export default function UsersClient({
 
   return (
     <>
+      <TelegramWebhookPanel />
+
       <section className="mb-8">
         <div className="mb-3 flex items-center justify-between">
           <h2 className="text-xl font-semibold">Auth users ({users.length})</h2>
