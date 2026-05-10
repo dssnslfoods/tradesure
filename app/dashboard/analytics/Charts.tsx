@@ -51,8 +51,7 @@ export function EquityCurve({ points }: { points: EquityPoint[] }) {
 
   const finalPnl = points[points.length - 1].cumPnl;
   const positive = finalPnl >= 0;
-  const stroke = positive ? "#34d399" : "#f87171";
-  const fill = positive ? "rgba(52,211,153,0.2)" : "rgba(248,113,113,0.2)";
+  const stroke = positive ? "#00d4aa" : "#ff5577";
 
   // Y-axis ticks (5 marks)
   const yTicks = 5;
@@ -60,10 +59,37 @@ export function EquityCurve({ points }: { points: EquityPoint[] }) {
     yMin + ((yMax - yMin) * i) / (yTicks - 1)
   );
 
+  // Dot markers — keep at most 8 evenly spaced
+  const maxDots = 8;
+  const stride = Math.max(1, Math.ceil(points.length / maxDots));
+  const markers = points.filter((_, i) => i % stride === 0 || i === points.length - 1);
+
+  const subtitleEl = (
+    <span
+      className={`tabular font-mono ${positive ? "text-sig-buy" : "text-sig-sell"}`}
+    >
+      {positive ? "+" : ""}
+      {finalPnl.toFixed(2)}%
+    </span>
+  );
+
   return (
-    <ChartFrame title="📈 Equity curve" subtitle={`Total PnL: ${finalPnl.toFixed(2)}%`}>
+    <ChartFrame title="Equity curve" subtitle={`Total PnL: ${finalPnl.toFixed(2)}%`}>
       <svg viewBox={`0 0 ${W} ${H}`} className="w-full">
-        {/* gridlines */}
+        <defs>
+          <linearGradient id="eq-grad" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0" stopColor={stroke} stopOpacity="0.4" />
+            <stop offset="1" stopColor={stroke} stopOpacity="0" />
+          </linearGradient>
+          <filter id="eq-glow" x="-20%" y="-20%" width="140%" height="140%">
+            <feGaussianBlur stdDeviation="2" result="blur" />
+            <feMerge>
+              <feMergeNode in="blur" />
+              <feMergeNode in="SourceGraphic" />
+            </feMerge>
+          </filter>
+        </defs>
+        {/* dotted gridlines */}
         {tickValues.map((v) => (
           <g key={v}>
             <line
@@ -71,16 +97,19 @@ export function EquityCurve({ points }: { points: EquityPoint[] }) {
               x2={W - PAD_R}
               y1={yScale(v)}
               y2={yScale(v)}
-              stroke="rgba(148,163,184,0.1)"
+              stroke="rgba(231,236,242,0.05)"
               strokeWidth={1}
+              strokeDasharray="2 4"
             />
             <text
               x={PAD_L - 5}
               y={yScale(v) + 3}
               textAnchor="end"
               fontSize="9"
-              fill="#64748b"
+              fill="#5b6573"
+              fontFamily="var(--font-mono), monospace"
             >
+              {v >= 0 ? "+" : ""}
               {v.toFixed(1)}%
             </text>
           </g>
@@ -91,22 +120,55 @@ export function EquityCurve({ points }: { points: EquityPoint[] }) {
           x2={W - PAD_R}
           y1={zeroY}
           y2={zeroY}
-          stroke="rgba(148,163,184,0.4)"
+          stroke="rgba(231,236,242,0.18)"
           strokeWidth={1}
           strokeDasharray="3 3"
         />
         {/* fill area */}
-        <path d={fillPath} fill={fill} />
-        {/* line */}
-        <path d={linePath} stroke={stroke} strokeWidth={2} fill="none" strokeLinejoin="round" />
+        <path d={fillPath} fill="url(#eq-grad)" />
+        {/* glow line */}
+        <path
+          d={linePath}
+          stroke={stroke}
+          strokeWidth={2.2}
+          fill="none"
+          strokeLinejoin="round"
+          strokeLinecap="round"
+          filter="url(#eq-glow)"
+        />
+        {/* dot markers */}
+        {markers.map((p, i) => (
+          <g key={i}>
+            <circle
+              cx={xScale(p.t)}
+              cy={yScale(p.cumPnl)}
+              r={3}
+              fill={stroke}
+              opacity={0.9}
+            />
+            <circle
+              cx={xScale(p.t)}
+              cy={yScale(p.cumPnl)}
+              r={5}
+              fill="none"
+              stroke={stroke}
+              strokeOpacity={0.3}
+              strokeWidth={1}
+            />
+          </g>
+        ))}
         {/* x-axis labels */}
-        <text x={PAD_L} y={H - 5} fontSize="9" fill="#64748b">
+        <text x={PAD_L} y={H - 5} fontSize="9" fill="#5b6573" fontFamily="var(--font-mono), monospace">
           {new Date(xMin).toLocaleDateString("en-GB")}
         </text>
-        <text x={W - PAD_R} y={H - 5} textAnchor="end" fontSize="9" fill="#64748b">
+        <text x={W - PAD_R} y={H - 5} textAnchor="end" fontSize="9" fill="#5b6573" fontFamily="var(--font-mono), monospace">
           {new Date(xMax).toLocaleDateString("en-GB")}
         </text>
       </svg>
+      <div className="mt-2 flex items-center justify-between text-[11px] text-ink-muted">
+        <span>{points.length} terminal trades</span>
+        {subtitleEl}
+      </div>
     </ChartFrame>
   );
 }
@@ -116,13 +178,13 @@ export function EquityCurve({ points }: { points: EquityPoint[] }) {
 // ============================================================
 export function OutcomeDonut({ outcomes }: { outcomes: AllAnalytics["outcomes"] }) {
   const items = [
-    { key: "WIN_TP2", label: "✅✅ TP2", value: outcomes.WIN_TP2, color: "#10b981" },
-    { key: "WIN_TP1", label: "✅ TP1", value: outcomes.WIN_TP1, color: "#34d399" },
-    { key: "LOSS_SL", label: "❌ SL", value: outcomes.LOSS_SL, color: "#f87171" },
-    { key: "OPEN", label: "⏳ Open", value: outcomes.OPEN, color: "#38bdf8" },
-    { key: "PENDING", label: "🕒 Pending", value: outcomes.PENDING, color: "#94a3b8" },
-    { key: "SKIP_WAIT", label: "⛔ No Trade", value: outcomes.SKIP_WAIT, color: "#fbbf24" },
-    { key: "NO_DATA_OR_ERROR", label: "— No data", value: outcomes.NO_DATA_OR_ERROR, color: "#475569" },
+    { key: "WIN_TP2", label: "TP2 hit", value: outcomes.WIN_TP2, color: "#00d4aa" },
+    { key: "WIN_TP1", label: "TP1 hit", value: outcomes.WIN_TP1, color: "#2af0c5" },
+    { key: "LOSS_SL", label: "SL hit", value: outcomes.LOSS_SL, color: "#ff5577" },
+    { key: "OPEN", label: "Open", value: outcomes.OPEN, color: "#5aa2ff" },
+    { key: "PENDING", label: "Pending", value: outcomes.PENDING, color: "#9aa4b2" },
+    { key: "SKIP_WAIT", label: "No Trade", value: outcomes.SKIP_WAIT, color: "#ffb547" },
+    { key: "NO_DATA_OR_ERROR", label: "No data", value: outcomes.NO_DATA_OR_ERROR, color: "#3a4250" },
   ].filter((x) => x.value > 0);
 
   const total = items.reduce((a, x) => a + x.value, 0);
@@ -133,13 +195,14 @@ export function OutcomeDonut({ outcomes }: { outcomes: AllAnalytics["outcomes"] 
   const cx = W / 2;
   const cy = H / 2;
   const rOuter = 90;
-  const rInner = 55;
+  const rInner = 60;
+  const gap = 0.012; // small gap between arcs
 
   let acc = 0;
   const arcs = items.map((it) => {
-    const start = (acc / total) * Math.PI * 2;
+    const start = (acc / total) * Math.PI * 2 + gap;
     acc += it.value;
-    const end = (acc / total) * Math.PI * 2;
+    const end = (acc / total) * Math.PI * 2 - gap;
     const large = end - start > Math.PI ? 1 : 0;
 
     const x0 = cx + rOuter * Math.sin(start);
@@ -162,39 +225,58 @@ export function OutcomeDonut({ outcomes }: { outcomes: AllAnalytics["outcomes"] 
     return { d, color: it.color, label: it.label, value: it.value };
   });
 
+  const winsTotal = outcomes.WIN_TP1 + outcomes.WIN_TP2;
+  const decided = winsTotal + outcomes.LOSS_SL;
+  const winRate = decided > 0 ? Math.round((winsTotal / decided) * 1000) / 10 : null;
+
   return (
-    <ChartFrame title="🎯 Outcome breakdown" subtitle={`${total} signals`}>
-      <div className="flex flex-wrap items-center gap-6">
-        <svg viewBox={`0 0 ${W} ${H}`} width={180} height={180} className="shrink-0">
-          {arcs.map((a, i) => (
-            <path key={i} d={a.d} fill={a.color} stroke="#0f172a" strokeWidth={1} />
-          ))}
-          <text
-            x={cx}
-            y={cy - 5}
-            textAnchor="middle"
-            fontSize="22"
-            fontWeight="bold"
-            fill="#e2e8f0"
-          >
-            {total}
-          </text>
-          <text x={cx} y={cy + 14} textAnchor="middle" fontSize="10" fill="#64748b">
-            signals
-          </text>
-        </svg>
-        <ul className="flex-1 space-y-1.5 text-xs">
+    <ChartFrame title="Outcome breakdown" subtitle={`${total} signals`}>
+      <div className="flex flex-wrap items-center gap-5">
+        <div className="relative shrink-0">
+          <svg viewBox={`0 0 ${W} ${H}`} width={180} height={180}>
+            <defs>
+              <filter id="donut-glow" x="-20%" y="-20%" width="140%" height="140%">
+                <feGaussianBlur stdDeviation="1" result="blur" />
+                <feMerge>
+                  <feMergeNode in="blur" />
+                  <feMergeNode in="SourceGraphic" />
+                </feMerge>
+              </filter>
+            </defs>
+            {arcs.map((a, i) => (
+              <path
+                key={i}
+                d={a.d}
+                fill={a.color}
+                filter="url(#donut-glow)"
+              />
+            ))}
+          </svg>
+          <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center">
+            <div className="text-[28px] font-bold tabular leading-none text-ink-primary">
+              {total}
+            </div>
+            <div className="mt-1 eyebrow !text-[9px]">signals</div>
+            {winRate !== null && (
+              <div className="mt-2 tabular text-[11px] text-sig-buy">
+                {winRate}% win
+              </div>
+            )}
+          </div>
+        </div>
+        <ul className="flex-1 space-y-1.5 text-[11px]">
           {arcs.map((a, i) => {
             const pct = ((a.value / total) * 100).toFixed(1);
             return (
               <li key={i} className="flex items-center gap-2">
                 <span
-                  className="inline-block h-3 w-3 rounded"
+                  className="inline-block h-2.5 w-2.5 rounded-sm"
                   style={{ background: a.color }}
                 />
-                <span className="text-slate-300">{a.label}</span>
-                <span className="ml-auto tabular-nums text-slate-400">
-                  {a.value} ({pct}%)
+                <span className="text-ink-secondary">{a.label}</span>
+                <span className="ml-auto font-mono tabular text-ink-muted">
+                  {a.value}
+                  <span className="ml-1 text-ink-faint">({pct}%)</span>
                 </span>
               </li>
             );
@@ -212,7 +294,7 @@ export function DailyPnlBars({ data }: { data: DailyPoint[] }) {
   if (data.length === 0) return <EmptyChart label="ยังไม่มี outcome รายวัน" />;
   const W = 600;
   const H = 200;
-  const PAD_L = 35;
+  const PAD_L = 40;
   const PAD_R = 12;
   const PAD_T = 12;
   const PAD_B = 32;
@@ -229,47 +311,55 @@ export function DailyPnlBars({ data }: { data: DailyPoint[] }) {
   const barW = innerW / data.length - 2;
 
   return (
-    <ChartFrame title="📅 Daily PnL" subtitle={`${data.length} day(s)`}>
+    <ChartFrame title="Daily PnL" subtitle={`${data.length} day(s)`}>
       <svg viewBox={`0 0 ${W} ${H}`} className="w-full">
+        <defs>
+          <linearGradient id="bar-buy" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0" stopColor="#00d4aa" stopOpacity="0.95" />
+            <stop offset="1" stopColor="#00d4aa" stopOpacity="0.5" />
+          </linearGradient>
+          <linearGradient id="bar-sell" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0" stopColor="#ff5577" stopOpacity="0.95" />
+            <stop offset="1" stopColor="#ff5577" stopOpacity="0.5" />
+          </linearGradient>
+        </defs>
         {/* zero line */}
         <line
           x1={PAD_L}
           x2={W - PAD_R}
           y1={zeroY}
           y2={zeroY}
-          stroke="rgba(148,163,184,0.4)"
+          stroke="rgba(231,236,242,0.18)"
           strokeWidth={1}
           strokeDasharray="3 3"
         />
         {/* y labels */}
-        <text x={PAD_L - 5} y={PAD_T + 8} textAnchor="end" fontSize="9" fill="#64748b">
-          {yMax.toFixed(1)}%
+        <text x={PAD_L - 5} y={PAD_T + 8} textAnchor="end" fontSize="9" fill="#5b6573" fontFamily="var(--font-mono), monospace">
+          +{yMax.toFixed(1)}%
         </text>
-        <text x={PAD_L - 5} y={H - PAD_B - 2} textAnchor="end" fontSize="9" fill="#64748b">
+        <text x={PAD_L - 5} y={H - PAD_B - 2} textAnchor="end" fontSize="9" fill="#5b6573" fontFamily="var(--font-mono), monospace">
           {yMin.toFixed(1)}%
         </text>
         {/* bars */}
         {data.map((d, i) => {
           const x = PAD_L + i * (innerW / data.length) + 1;
           const y = d.pnl >= 0 ? yScale(d.pnl) : zeroY;
-          const h = Math.abs(yScale(d.pnl) - zeroY);
-          const color = d.pnl >= 0 ? "#34d399" : "#f87171";
+          const h = Math.max(1, Math.abs(yScale(d.pnl) - zeroY));
+          const grad = d.pnl >= 0 ? "url(#bar-buy)" : "url(#bar-sell)";
           return (
-            <g key={d.date}>
-              <rect x={x} y={y} width={barW} height={h} fill={color} opacity="0.85">
-                <title>
-                  {d.date}: {d.pnl >= 0 ? "+" : ""}
-                  {d.pnl}% · {d.wins}W/{d.losses}L
-                </title>
-              </rect>
-            </g>
+            <rect key={d.date} x={x} y={y} width={barW} height={h} rx="1" fill={grad}>
+              <title>
+                {d.date}: {d.pnl >= 0 ? "+" : ""}
+                {d.pnl}% · {d.wins}W/{d.losses}L
+              </title>
+            </rect>
           );
         })}
         {/* x axis dates: first/last */}
-        <text x={PAD_L} y={H - 10} fontSize="9" fill="#64748b">
+        <text x={PAD_L} y={H - 10} fontSize="9" fill="#5b6573" fontFamily="var(--font-mono), monospace">
           {data[0].date}
         </text>
-        <text x={W - PAD_R} y={H - 10} textAnchor="end" fontSize="9" fill="#64748b">
+        <text x={W - PAD_R} y={H - 10} textAnchor="end" fontSize="9" fill="#5b6573" fontFamily="var(--font-mono), monospace">
           {data[data.length - 1].date}
         </text>
       </svg>
@@ -287,34 +377,42 @@ export function TopSymbols({ data }: { data: SymbolStat[] }) {
   const maxAbs = Math.max(...top.map((s) => Math.abs(s.totalPnl))) || 1;
 
   return (
-    <ChartFrame title="🏆 Top symbols (PnL)" subtitle={`${data.length} symbol(s)`}>
+    <ChartFrame title="Top symbols" subtitle={`${data.length} symbol(s) · sorted by PnL`}>
       <ul className="space-y-2">
         {top.map((s) => {
           const pct = (Math.abs(s.totalPnl) / maxAbs) * 100;
           const positive = s.totalPnl >= 0;
           return (
-            <li key={s.symbol} className="flex items-center gap-3 text-xs">
-              <span className="w-20 shrink-0 font-semibold text-slate-200">{s.symbol}</span>
-              <div className="relative h-5 flex-1 rounded bg-black/30">
+            <li key={s.symbol} className="flex items-center gap-3 text-[12px]">
+              <span className="w-20 shrink-0 font-semibold text-ink-primary">{s.symbol}</span>
+              <div className="relative h-5 flex-1 rounded-chip bg-surface-2/60">
                 <div
-                  className={`absolute h-full rounded ${
-                    positive ? "bg-emerald-500/40" : "bg-rose-500/40"
-                  }`}
-                  style={{ width: `${pct}%` }}
+                  className="absolute h-full rounded-chip"
+                  style={{
+                    width: `${pct}%`,
+                    background: positive
+                      ? "linear-gradient(90deg, rgba(0,212,170,0.15), rgba(0,212,170,0.45))"
+                      : "linear-gradient(90deg, rgba(255,85,119,0.15), rgba(255,85,119,0.45))",
+                    boxShadow: positive
+                      ? "inset 0 0 8px rgba(0,212,170,0.2)"
+                      : "inset 0 0 8px rgba(255,85,119,0.2)",
+                  }}
                 />
                 <span
-                  className={`absolute inset-0 flex items-center px-2 font-semibold tabular-nums ${
-                    positive ? "text-emerald-300" : "text-rose-300"
+                  className={`absolute inset-0 flex items-center px-2 font-mono font-semibold tabular ${
+                    positive ? "text-sig-buy" : "text-sig-sell"
                   }`}
                 >
                   {positive ? "+" : ""}
                   {s.totalPnl}%
                 </span>
               </div>
-              <span className="w-20 shrink-0 text-right text-slate-500">
-                {s.wins}W / {s.losses}L
+              <span className="w-24 shrink-0 text-right font-mono text-[11px] text-ink-muted">
+                <span className="text-sig-buy">{s.wins}W</span>
+                <span className="text-ink-faint"> / </span>
+                <span className="text-sig-sell">{s.losses}L</span>
                 {s.winRate !== null && (
-                  <span className="ml-1 text-slate-600">({s.winRate}%)</span>
+                  <span className="ml-1 text-ink-faint">({s.winRate}%)</span>
                 )}
               </span>
             </li>
@@ -332,7 +430,7 @@ export function RollingWinRate({ points }: { points: RollingPoint[] }) {
   if (points.length < 2) return <EmptyChart label="ต้องมีอย่างน้อย 2 trades ที่จบแล้ว" />;
   const W = 600;
   const H = 180;
-  const PAD_L = 35;
+  const PAD_L = 40;
   const PAD_R = 12;
   const PAD_T = 12;
   const PAD_B = 24;
@@ -349,36 +447,84 @@ export function RollingWinRate({ points }: { points: RollingPoint[] }) {
     .map((p, i) => `${i === 0 ? "M" : "L"} ${xScale(p.t).toFixed(1)} ${yScale(p.winRate).toFixed(1)}`)
     .join(" ");
 
+  const lastPt = points[points.length - 1];
+
   return (
-    <ChartFrame title="📊 Rolling win rate (window 10)" subtitle="หลังเฉลี่ย 10 trades ล่าสุด">
+    <ChartFrame title="Rolling win rate (window 10)" subtitle="เฉลี่ย 10 trades ล่าสุด">
       <svg viewBox={`0 0 ${W} ${H}`} className="w-full">
-        {/* 50% reference line */}
-        <line
-          x1={PAD_L}
-          x2={W - PAD_R}
-          y1={yScale(50)}
-          y2={yScale(50)}
-          stroke="rgba(148,163,184,0.4)"
-          strokeWidth={1}
-          strokeDasharray="3 3"
+        <defs>
+          <filter id="roll-glow" x="-20%" y="-20%" width="140%" height="140%">
+            <feGaussianBlur stdDeviation="1.5" result="blur" />
+            <feMerge>
+              <feMergeNode in="blur" />
+              <feMergeNode in="SourceGraphic" />
+            </feMerge>
+          </filter>
+        </defs>
+        {/* gridlines */}
+        {[0, 50, 100].map((v) => (
+          <line
+            key={v}
+            x1={PAD_L}
+            x2={W - PAD_R}
+            y1={yScale(v)}
+            y2={yScale(v)}
+            stroke={v === 50 ? "rgba(231,236,242,0.18)" : "rgba(231,236,242,0.05)"}
+            strokeDasharray={v === 50 ? "3 3" : "2 4"}
+            strokeWidth={1}
+          />
+        ))}
+        {[0, 25, 50, 75, 100].map((v) => (
+          <text
+            key={v}
+            x={PAD_L - 5}
+            y={yScale(v) + 3}
+            textAnchor="end"
+            fontSize="9"
+            fill="#5b6573"
+            fontFamily="var(--font-mono), monospace"
+          >
+            {v}%
+          </text>
+        ))}
+        <path
+          d={path}
+          stroke="#b87cff"
+          strokeWidth={2.2}
+          fill="none"
+          strokeLinejoin="round"
+          strokeLinecap="round"
+          filter="url(#roll-glow)"
         />
-        <text x={PAD_L - 5} y={yScale(0) + 3} textAnchor="end" fontSize="9" fill="#64748b">
-          0%
-        </text>
-        <text x={PAD_L - 5} y={yScale(50) + 3} textAnchor="end" fontSize="9" fill="#64748b">
-          50%
-        </text>
-        <text x={PAD_L - 5} y={yScale(100) + 3} textAnchor="end" fontSize="9" fill="#64748b">
-          100%
-        </text>
-        <path d={path} stroke="#38bdf8" strokeWidth={2} fill="none" strokeLinejoin="round" />
-        <text x={PAD_L} y={H - 5} fontSize="9" fill="#64748b">
+        {/* end dot */}
+        <circle
+          cx={xScale(lastPt.t)}
+          cy={yScale(lastPt.winRate)}
+          r={4}
+          fill="#b87cff"
+        />
+        <circle
+          cx={xScale(lastPt.t)}
+          cy={yScale(lastPt.winRate)}
+          r={7}
+          fill="none"
+          stroke="#b87cff"
+          strokeOpacity={0.4}
+          strokeWidth={1.5}
+        />
+        <text x={PAD_L} y={H - 5} fontSize="9" fill="#5b6573" fontFamily="var(--font-mono), monospace">
           {new Date(xMin).toLocaleDateString("en-GB")}
         </text>
-        <text x={W - PAD_R} y={H - 5} textAnchor="end" fontSize="9" fill="#64748b">
+        <text x={W - PAD_R} y={H - 5} textAnchor="end" fontSize="9" fill="#5b6573" fontFamily="var(--font-mono), monospace">
           {new Date(xMax).toLocaleDateString("en-GB")}
         </text>
       </svg>
+      <div className="mt-2 flex items-center justify-between text-[11px]">
+        <span className="text-ink-muted">{points.length} terminal trades</span>
+        <span className="font-mono tabular text-sig-violet">
+          Latest: {lastPt.winRate}%
+        </span>
+      </div>
     </ChartFrame>
   );
 }
@@ -392,43 +538,54 @@ export function HourOfDayHeatmap({ data }: { data: HourlyStat[] }) {
   if (totalSignals === 0) return <EmptyChart label="ยังไม่มี trade ที่จบ" />;
 
   return (
-    <ChartFrame title="🕒 Performance by hour of day" subtitle="(เวลาท้องถิ่น browser)">
-      <div className="grid grid-cols-12 gap-1 text-[9px]">
+    <ChartFrame title="Performance by hour of day" subtitle="เวลาท้องถิ่น browser · 24 cells">
+      <div className="grid grid-cols-12 gap-1.5 text-[9px]">
         {data.map((h) => {
           const intensity = h.count / maxCount;
-          // background by win rate
           const wr = h.winRate;
           const bg =
             wr === null
-              ? "rgba(71,85,105,0.4)"
+              ? "rgba(58,66,80,0.35)"
               : wr >= 60
-              ? `rgba(52,211,153,${0.3 + intensity * 0.5})`
+              ? `rgba(0,212,170,${0.25 + intensity * 0.55})`
               : wr >= 40
-              ? `rgba(251,191,36,${0.3 + intensity * 0.5})`
-              : `rgba(248,113,113,${0.3 + intensity * 0.5})`;
+              ? `rgba(255,181,71,${0.25 + intensity * 0.55})`
+              : `rgba(255,85,119,${0.25 + intensity * 0.55})`;
+          const border =
+            wr === null
+              ? "rgba(255,255,255,0.05)"
+              : wr >= 60
+              ? "rgba(0,212,170,0.35)"
+              : wr >= 40
+              ? "rgba(255,181,71,0.35)"
+              : "rgba(255,85,119,0.35)";
           return (
             <div
               key={h.hour}
-              className="flex aspect-square flex-col items-center justify-center rounded border border-slate-700/40"
-              style={{ background: bg }}
+              className="flex aspect-square flex-col items-center justify-center rounded-[8px] border transition hover:scale-105"
+              style={{ background: bg, borderColor: border }}
               title={
                 h.count === 0
                   ? `${h.hour}:00 — ไม่มีข้อมูล`
                   : `${h.hour}:00 — ${h.count} trades, ${h.wins}W/${h.losses}L, PnL ${h.totalPnl}%`
               }
             >
-              <span className="text-[10px] font-bold text-slate-100">{h.hour}</span>
-              {h.count > 0 && <span className="text-slate-300">{h.count}</span>}
+              <span className="font-mono text-[10px] font-bold text-ink-primary">
+                {h.hour.toString().padStart(2, "0")}
+              </span>
+              {h.count > 0 && (
+                <span className="font-mono text-[9px] text-ink-secondary">{h.count}</span>
+              )}
             </div>
           );
         })}
       </div>
-      <div className="mt-3 flex flex-wrap items-center gap-3 text-[10px] text-slate-400">
-        <span>Win rate:</span>
-        <span className="rounded bg-emerald-500/40 px-1.5 py-0.5 text-emerald-200">≥ 60%</span>
-        <span className="rounded bg-amber-500/40 px-1.5 py-0.5 text-amber-200">40-60%</span>
-        <span className="rounded bg-rose-500/40 px-1.5 py-0.5 text-rose-200">&lt; 40%</span>
-        <span className="ml-auto">Opacity = ความถี่ของ trade ในชั่วโมงนั้น</span>
+      <div className="mt-3 flex flex-wrap items-center gap-3 text-[10px] text-ink-muted">
+        <span className="text-ink-secondary">Win rate:</span>
+        <span className="chip chip-buy !text-[10px] !py-0.5">≥ 60%</span>
+        <span className="chip chip-warn !text-[10px] !py-0.5">40–60%</span>
+        <span className="chip chip-sell !text-[10px] !py-0.5">&lt; 40%</span>
+        <span className="ml-auto italic">Opacity = ความถี่ของ trade</span>
       </div>
     </ChartFrame>
   );

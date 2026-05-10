@@ -19,9 +19,9 @@ export default async function DashboardLayout({
 
       <Sidebar isAdmin={isAdmin} username={me.username} />
 
-      <div className="flex flex-1 flex-col">
+      <div className="flex min-w-0 flex-1 flex-col">
         <Topbar username={me.username} isAdmin={isAdmin} />
-        <main className="flex-1 px-7 py-7">
+        <main className="flex-1 px-4 py-5 sm:px-7 sm:py-7">
           <div className="mx-auto max-w-[1480px]">{children}</div>
         </main>
       </div>
