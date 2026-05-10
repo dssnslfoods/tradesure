@@ -126,8 +126,8 @@ fmt(float x) => str.tostring(math.round(x * math.pow(10, priceDecimals)) / math.
 
 makePayload(string sig, float eMid, float eLow, float eHigh, float sl, float tp1v, float tp2v, float rAbs, float rPct) =>
     a = '{"secret":"' + secret + '","source":"' + botName + '","signal":"' + sig + '"'
-    b = ',"symbol":"' + syminfo.ticker + '","exchange":"' + syminfo.prefix + '","timeframe":"' + timeframe.period + '"'
-    c = ',"bar_time":' + str.tostring(time) + ',"price":' + fmt(close)
+    b = ',"symbol":"' + syminfo.ticker + '","exchange":"' + syminfo.prefix + '","interval":"' + timeframe.period + '","timeframe":"' + timeframe.period + '"'
+    c = ',"time":' + str.tostring(time) + ',"bar_time":' + str.tostring(time) + ',"price":' + fmt(close)
     d = ',"entry":' + fmt(eMid) + ',"entry_low":' + fmt(eLow) + ',"entry_high":' + fmt(eHigh)
     e = ',"stop_loss":' + fmt(sl) + ',"take_profit":' + fmt(tp1v) + ',"tp1":' + fmt(tp1v) + ',"tp2":' + fmt(tp2v) + ',"sl":' + fmt(sl)
     f = ',"risk":' + fmt(rAbs) + ',"risk_percent":' + fmt(rPct) + ',"risk_reward_ratio":' + str.tostring(tp2Mult)
