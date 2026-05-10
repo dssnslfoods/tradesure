@@ -42,6 +42,26 @@ export async function createUserFromContact(input: {
     if (cErr || !contact) throw new Error("contact not found");
     if (contact.registered_user_id) throw new Error("contact นี้ถูกผูกกับ user แล้ว");
 
+    // Guard: another auth_user might already have this chat_id (e.g. admin
+    // who happens to be the same Telegram account). In that case, just link
+    // the contact to the existing user instead of creating a duplicate.
+    const { data: dupChat } = await supabase
+      .from("auth_users")
+      .select("id, username")
+      .eq("telegram_chat_id", contact.chat_id)
+      .maybeSingle();
+    if (dupChat) {
+      await supabase
+        .from("telegram_contacts")
+        .update({ registered_user_id: dupChat.id })
+        .eq("id", contact.id);
+      revalidatePath("/dashboard/users");
+      return {
+        ok: false,
+        error: `Chat ID นี้ถูกใช้กับ user "${dupChat.username}" อยู่แล้ว — link contact ให้แล้ว`,
+      };
+    }
+
     const { data: newUser, error: uErr } = await supabase
       .from("auth_users")
       .insert({
@@ -62,6 +82,48 @@ export async function createUserFromContact(input: {
 
     revalidatePath("/dashboard/users");
     return { ok: true };
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : "unknown" };
+  }
+}
+
+// Backfill telegram_contacts.registered_user_id by matching chat_id.
+// Run automatically when the admin opens /dashboard/users so existing
+// orphaned contacts get linked to existing auth_users.
+export async function backfillContactLinks(): Promise<{ ok: boolean; linked?: number; error?: string }> {
+  const guard = await requireAdmin();
+  if (!guard.ok) return guard;
+  try {
+    const supabase = getSupabaseAdmin();
+    const { data: orphans, error } = await supabase
+      .from("telegram_contacts")
+      .select("id, chat_id")
+      .is("registered_user_id", null);
+    if (error) throw error;
+    if (!orphans || orphans.length === 0) return { ok: true, linked: 0 };
+
+    const chatIds = orphans.map((o) => o.chat_id);
+    const { data: users } = await supabase
+      .from("auth_users")
+      .select("id, telegram_chat_id")
+      .in("telegram_chat_id", chatIds);
+
+    const map = new Map<string, string>();
+    (users ?? []).forEach((u) => map.set(u.telegram_chat_id, u.id));
+
+    let linked = 0;
+    for (const c of orphans) {
+      const uid = map.get(c.chat_id);
+      if (uid) {
+        await supabase
+          .from("telegram_contacts")
+          .update({ registered_user_id: uid })
+          .eq("id", c.id);
+        linked++;
+      }
+    }
+    if (linked > 0) revalidatePath("/dashboard/users");
+    return { ok: true, linked };
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : "unknown" };
   }

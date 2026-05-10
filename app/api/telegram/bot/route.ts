@@ -76,6 +76,15 @@ export async function POST(req: NextRequest) {
 
   const supabase = getSupabaseAdmin();
 
+  // Auto-link to an existing auth_user with the same chat_id, if any.
+  const { data: matchingUser } = await supabase
+    .from("auth_users")
+    .select("id")
+    .eq("telegram_chat_id", chatId)
+    .eq("is_active", true)
+    .maybeSingle();
+  const linkedUserId = matchingUser?.id ?? null;
+
   // Upsert by chat_id; bump counters on repeat messages.
   const nowIso = new Date().toISOString();
   const { data: existing } = await supabase
@@ -86,7 +95,7 @@ export async function POST(req: NextRequest) {
 
   let alreadyRegistered = false;
   if (existing) {
-    alreadyRegistered = existing.registered_user_id !== null;
+    alreadyRegistered = existing.registered_user_id !== null || linkedUserId !== null;
     await supabase
       .from("telegram_contacts")
       .update({
@@ -98,9 +107,14 @@ export async function POST(req: NextRequest) {
         last_message_text: text.slice(0, 500),
         message_count: (existing.message_count ?? 0) + 1,
         last_seen_at: nowIso,
+        // Backfill the link if it was missing
+        ...(existing.registered_user_id === null && linkedUserId
+          ? { registered_user_id: linkedUserId }
+          : {}),
       })
       .eq("id", existing.id);
   } else {
+    alreadyRegistered = linkedUserId !== null;
     await supabase.from("telegram_contacts").insert({
       chat_id: chatId,
       username: from.username ?? null,
@@ -109,6 +123,7 @@ export async function POST(req: NextRequest) {
       language_code: from.language_code ?? null,
       is_bot: from.is_bot ?? false,
       last_message_text: text.slice(0, 500),
+      registered_user_id: linkedUserId,
       first_seen_at: nowIso,
       last_seen_at: nowIso,
     });

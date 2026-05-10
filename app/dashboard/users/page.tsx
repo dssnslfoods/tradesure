@@ -5,6 +5,7 @@ import { getSupabaseAdmin } from "@/lib/supabase/server";
 import { findUserById } from "@/lib/auth/otp";
 import { verifySessionToken, SESSION_COOKIE } from "@/lib/auth/session";
 import UsersClient from "./UsersClient";
+import { backfillContactLinks } from "./actions";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -57,6 +58,9 @@ export default async function UsersPage() {
       </main>
     );
   }
+
+  // Best-effort: link any orphaned contacts to existing users with matching chat_id
+  await backfillContactLinks().catch(() => null);
 
   const supabase = getSupabaseAdmin();
   const [usersQ, contactsQ] = await Promise.all([
