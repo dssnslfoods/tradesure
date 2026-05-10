@@ -134,6 +134,35 @@ function ColHeader({
   );
 }
 
+function LevelCell({
+  label,
+  value,
+  tone,
+}: {
+  label: string;
+  value: string;
+  tone: "slate" | "rose" | "emerald";
+}) {
+  const valueClass = {
+    slate: "text-slate-200",
+    rose: "text-rose-300",
+    emerald: "text-emerald-300",
+  }[tone];
+  const borderClass = {
+    slate: "border-slate-600/30",
+    rose: "border-rose-500/30",
+    emerald: "border-emerald-500/30",
+  }[tone];
+  return (
+    <div className={`rounded border ${borderClass} bg-black/20 px-2 py-1`}>
+      <div className="text-[9px] uppercase tracking-wider text-slate-500">
+        {label}
+      </div>
+      <div className={`tabular-nums font-semibold ${valueClass}`}>{value}</div>
+    </div>
+  );
+}
+
 function entryMid(r: SignalRow): number | null {
   if (r.entry_low !== null && r.entry_high !== null) {
     return (r.entry_low + r.entry_high) / 2;
@@ -328,167 +357,153 @@ export default function SignalsTable({ rows }: { rows: SignalRow[] }) {
         </div>
       </div>
 
-      <div className="overflow-x-auto">
-        <table className="min-w-full divide-y divide-crypto-border text-sm">
-          <thead className="bg-black/30 text-left text-xs uppercase tracking-wider text-slate-400">
-            <tr>
-              <th className="w-10 px-4 py-3">
-                <input
-                  type="checkbox"
-                  checked={allSelected}
-                  ref={(el) => {
-                    if (el) el.indeterminate = someSelected;
-                  }}
-                  onChange={toggleAll}
-                  className="h-4 w-4 cursor-pointer accent-rose-500"
-                  aria-label="Select all"
-                />
-              </th>
-              <ColHeader label="Time" />
-              <ColHeader label="Symbol" />
-              <ColHeader label="TF" />
-              <ColHeader label="Signal" />
-              <ColHeader label="Price" />
-              <ColHeader label="AI Bias" />
-              <ColHeader label="Conf." />
-              <ColHeader label="Risk" />
-              <ColHeader label="Entry" />
-              <ColHeader label="SL" className="text-rose-300/70" />
-              <ColHeader label="TP1" className="text-emerald-300/70" />
-              <ColHeader label="TP2" className="text-emerald-300/70" />
-              <ColHeader label="R:R" />
-              <ColHeader label="Outcome" />
-              <ColHeader label="PnL" />
-              <ColHeader label="TG" />
-              <ColHeader label="Actions" align="right" />
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-crypto-border">
-            {rows.length === 0 && (
-              <tr>
-                <td colSpan={18} className="px-4 py-12 text-center text-slate-500">
-                  No signals yet. Send a test webhook to{" "}
-                  <code className="text-emerald-300">/api/webhook/tradingview</code>.
-                </td>
-              </tr>
-            )}
-            {rows.map((r) => {
-              const isSel = selected.has(r.signal_id);
-              return (
-                <tr
-                  key={r.id}
-                  className={`hover:bg-black/20 ${isSel ? "bg-rose-500/5" : ""}`}
-                >
-                  <td className="px-4 py-3">
-                    <input
-                      type="checkbox"
-                      checked={isSel}
-                      onChange={() => toggleOne(r.signal_id)}
-                      className="h-4 w-4 cursor-pointer accent-rose-500"
-                      aria-label={`Select row ${r.symbol} ${fmtTime(r.created_at)}`}
-                    />
-                  </td>
-                  <td className="whitespace-nowrap px-4 py-3 text-slate-300">
+      {/* Header row: checkbox-all + column legend */}
+      <div className="flex items-center gap-3 border-b border-crypto-border bg-black/30 px-4 py-2 text-[10px] uppercase tracking-wider text-slate-500">
+        <input
+          type="checkbox"
+          checked={allSelected}
+          ref={(el) => {
+            if (el) el.indeterminate = someSelected;
+          }}
+          onChange={toggleAll}
+          className="h-4 w-4 cursor-pointer accent-rose-500"
+          aria-label="Select all"
+        />
+        <span>เลือกทั้งหมด</span>
+        <span className="ml-auto">{rows.length} รายการ</span>
+      </div>
+
+      {/* Card list — no horizontal scroll */}
+      <div className="divide-y divide-crypto-border">
+        {rows.length === 0 && (
+          <div className="px-4 py-12 text-center text-sm text-slate-500">
+            No signals yet. Send a test webhook to{" "}
+            <code className="text-emerald-300">/api/webhook/tradingview</code>.
+          </div>
+        )}
+        {rows.map((r) => {
+          const isSel = selected.has(r.signal_id);
+          const rr = rrRatio(r);
+          return (
+            <div
+              key={r.id}
+              className={`grid grid-cols-[auto_1fr_auto] items-start gap-3 px-4 py-3 transition hover:bg-black/20 ${
+                isSel ? "bg-rose-500/5" : ""
+              }`}
+            >
+              {/* Left: checkbox */}
+              <input
+                type="checkbox"
+                checked={isSel}
+                onChange={() => toggleOne(r.signal_id)}
+                className="mt-1 h-4 w-4 cursor-pointer accent-rose-500"
+                aria-label={`Select row ${r.symbol} ${fmtTime(r.created_at)}`}
+              />
+
+              {/* Middle: all signal info */}
+              <div className="min-w-0 space-y-2">
+                {/* Top line: time, symbol, TF, signal, outcome */}
+                <div className="flex flex-wrap items-center gap-2 text-sm">
+                  <span className="font-mono text-xs text-slate-400">
                     {fmtTime(r.created_at)}
-                  </td>
-                  <td className="whitespace-nowrap px-4 py-3 font-semibold text-slate-100">
-                    {r.symbol}
-                  </td>
-                  <td className="whitespace-nowrap px-4 py-3 text-slate-400">
+                  </span>
+                  <span className="font-bold text-slate-100">{r.symbol}</span>
+                  <span className="rounded bg-slate-700/40 px-1.5 py-0.5 text-[10px] font-semibold text-slate-300">
                     {r.interval}
-                  </td>
-                  <td className="whitespace-nowrap px-4 py-3">
-                    <span className={signalBadge(r.tv_signal ?? "-")}>
-                      {r.tv_signal ?? "-"}
-                    </span>
-                  </td>
-                  <td className="whitespace-nowrap px-4 py-3 tabular-nums text-slate-200">
+                  </span>
+                  <span className={signalBadge(r.tv_signal ?? "-")}>
+                    {r.tv_signal ?? "-"}
+                  </span>
+                  <span className="text-xs text-slate-500">@</span>
+                  <span className="tabular-nums text-sm font-semibold text-slate-200">
                     {fmtPrice(r.tv_price)}
-                  </td>
-                  <td className="whitespace-nowrap px-4 py-3">
-                    <span className={biasBadge(r.bias)}>{r.bias ?? "-"}</span>
-                  </td>
-                  <td className="whitespace-nowrap px-4 py-3 tabular-nums text-slate-200">
-                    {r.confidence ?? "-"}
-                    {r.confidence !== null ? "%" : ""}
-                  </td>
-                  <td className="whitespace-nowrap px-4 py-3">
-                    <span className={riskBadge(r.risk_level)}>{r.risk_level ?? "-"}</span>
-                  </td>
-                  <td className="whitespace-nowrap px-4 py-3 tabular-nums text-slate-300">
-                    {fmtPrice(entryMid(r))}
-                  </td>
-                  <td className="whitespace-nowrap px-4 py-3 tabular-nums text-rose-300/90">
-                    {fmtPrice(r.stop_loss_num)}
-                  </td>
-                  <td className="whitespace-nowrap px-4 py-3 tabular-nums text-emerald-300/90">
-                    {fmtPrice(r.take_profit_1_num)}
-                  </td>
-                  <td className="whitespace-nowrap px-4 py-3 tabular-nums text-emerald-300/90">
-                    {fmtPrice(r.take_profit_2_num)}
-                  </td>
-                  <td className="whitespace-nowrap px-4 py-3 tabular-nums text-slate-300">
-                    {rrRatio(r) === null ? "-" : `${rrRatio(r)?.toFixed(2)}:1`}
-                  </td>
-                  <td className="whitespace-nowrap px-4 py-3">
+                  </span>
+                  <span className="ml-auto flex items-center gap-2">
                     <span className={outcomeBadge(r.outcome)}>
                       {outcomeLabel(r.outcome)}
                     </span>
                     {r.bars_evaluated ? (
-                      <span className="ml-2 text-[10px] text-slate-500">
+                      <span className="text-[10px] text-slate-500">
                         {r.bars_evaluated} bars
                       </span>
                     ) : null}
-                  </td>
-                  <td className="whitespace-nowrap px-4 py-3 tabular-nums">
                     <span
-                      className={
+                      className={`text-sm font-bold tabular-nums ${
                         r.pnl_pct === null
                           ? "text-slate-500"
                           : r.pnl_pct >= 0
                           ? "text-emerald-400"
                           : "text-rose-400"
-                      }
+                      }`}
                     >
                       {fmtPnl(r.pnl_pct)}
                     </span>
-                  </td>
-                  <td className="whitespace-nowrap px-4 py-3">
-                    {r.telegram_sent ? (
-                      <span className="text-emerald-400">✓</span>
-                    ) : (
-                      <span className="text-rose-400">✗</span>
-                    )}
-                  </td>
-                  <td className="whitespace-nowrap px-4 py-3 text-right">
-                    <div className="inline-flex gap-1">
-                      <button
-                        type="button"
-                        onClick={() => setEditing(r)}
-                        disabled={pending}
-                        className="rounded border border-sky-500/40 bg-sky-500/10 px-2 py-1 text-xs font-semibold text-sky-300 hover:bg-sky-500/20 disabled:opacity-40"
-                        title="Edit SL/TP levels"
-                      >
-                        ✏️
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() =>
-                          onDeleteOne(r.signal_id, `${r.symbol} ${fmtTime(r.created_at)}`)
-                        }
-                        disabled={pending}
-                        className="rounded border border-rose-500/40 bg-rose-500/10 px-2 py-1 text-xs font-semibold text-rose-300 hover:bg-rose-500/20 disabled:opacity-40"
-                        title="Delete signal permanently"
-                      >
-                        🗑
-                      </button>
-                    </div>
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
+                  </span>
+                </div>
+
+                {/* Middle line: AI bias / confidence / risk / R:R */}
+                <div className="flex flex-wrap items-center gap-2 text-xs">
+                  <span className="text-slate-500">AI:</span>
+                  <span className={biasBadge(r.bias)}>{r.bias ?? "-"}</span>
+                  <span className="text-slate-400">
+                    Conf.{" "}
+                    <span className="font-semibold text-slate-200">
+                      {r.confidence ?? "-"}
+                      {r.confidence !== null ? "%" : ""}
+                    </span>
+                  </span>
+                  <span className={riskBadge(r.risk_level)}>{r.risk_level ?? "-"}</span>
+                  <span className="text-slate-400">
+                    R:R{" "}
+                    <span className="font-semibold text-slate-200 tabular-nums">
+                      {rr === null ? "-" : `${rr.toFixed(2)}:1`}
+                    </span>
+                  </span>
+                  <span className="text-slate-500">·</span>
+                  <span
+                    className={
+                      r.telegram_sent ? "text-emerald-400" : "text-rose-400"
+                    }
+                  >
+                    {r.telegram_sent ? "📤 sent" : "📤 ✗"}
+                  </span>
+                </div>
+
+                {/* Bottom line: levels grid (Entry / SL / TP1 / TP2) */}
+                <div className="grid grid-cols-2 gap-2 text-xs sm:grid-cols-4">
+                  <LevelCell label="Entry" value={fmtPrice(entryMid(r))} tone="slate" />
+                  <LevelCell label="SL" value={fmtPrice(r.stop_loss_num)} tone="rose" />
+                  <LevelCell label="TP1" value={fmtPrice(r.take_profit_1_num)} tone="emerald" />
+                  <LevelCell label="TP2" value={fmtPrice(r.take_profit_2_num)} tone="emerald" />
+                </div>
+              </div>
+
+              {/* Right: actions */}
+              <div className="flex flex-col gap-1 sm:flex-row">
+                <button
+                  type="button"
+                  onClick={() => setEditing(r)}
+                  disabled={pending}
+                  className="rounded border border-sky-500/40 bg-sky-500/10 px-2 py-1 text-xs font-semibold text-sky-300 hover:bg-sky-500/20 disabled:opacity-40"
+                  title="Edit SL/TP levels"
+                >
+                  ✏️
+                </button>
+                <button
+                  type="button"
+                  onClick={() =>
+                    onDeleteOne(r.signal_id, `${r.symbol} ${fmtTime(r.created_at)}`)
+                  }
+                  disabled={pending}
+                  className="rounded border border-rose-500/40 bg-rose-500/10 px-2 py-1 text-xs font-semibold text-rose-300 hover:bg-rose-500/20 disabled:opacity-40"
+                  title="Delete signal permanently"
+                >
+                  🗑
+                </button>
+              </div>
+            </div>
+          );
+        })}
       </div>
 
       <EditLevelsModal
