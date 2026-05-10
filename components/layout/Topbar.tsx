@@ -2,6 +2,7 @@
 
 import Icon from "@/components/ui/Icon";
 import MobileNav from "./MobileNav";
+import NotificationsBell from "./NotificationsBell";
 
 export default function Topbar({
   username,
@@ -47,14 +48,7 @@ export default function Topbar({
           Live · Binance
         </div>
 
-        <button
-          type="button"
-          className="relative flex h-9 w-9 items-center justify-center rounded-chip border border-white/5 bg-surface-1/60 text-ink-secondary transition hover:bg-surface-2 hover:text-ink-primary"
-          aria-label="Notifications"
-        >
-          <Icon name="bell" size={16} />
-          <span className="absolute right-2 top-2 h-1.5 w-1.5 rounded-full bg-sig-buy shadow-[0_0_8px_rgba(0,212,170,0.8)]" />
-        </button>
+        <NotificationsBell />
 
         <div className="flex items-center gap-2 rounded-chip border border-white/5 bg-surface-1/60 px-2 py-1.5">
           <span
