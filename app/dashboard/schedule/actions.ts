@@ -2,8 +2,16 @@
 
 import { revalidatePath } from "next/cache";
 import { updateScheduleConfig } from "@/lib/schedule/settings";
+import { isCurrentUserAdmin } from "@/lib/auth/guards";
+
+async function requireAdminOrThrow() {
+  if (!(await isCurrentUserAdmin())) {
+    throw new Error("admin only");
+  }
+}
 
 export async function setEnabled(enabled: boolean, reason?: string | null) {
+  await requireAdminOrThrow();
   await updateScheduleConfig({
     enabled,
     paused_reason: enabled ? null : reason ?? "Paused from dashboard",
@@ -12,6 +20,7 @@ export async function setEnabled(enabled: boolean, reason?: string | null) {
 }
 
 export async function setIntervalMinutes(minutes: number) {
+  await requireAdminOrThrow();
   if (!Number.isFinite(minutes) || minutes < 1) {
     throw new Error("interval_minutes must be >= 1");
   }
@@ -20,6 +29,7 @@ export async function setIntervalMinutes(minutes: number) {
 }
 
 export async function triggerRunNow() {
+  await requireAdminOrThrow();
   // Internal call: hit our own backtest endpoint with force=1 (overrides paused
   // flag) and trigger=manual so it gets logged correctly.
   const base =

@@ -1,10 +1,10 @@
 import Link from "next/link";
-import { cookies } from "next/headers";
 import { getSupabaseAdmin } from "@/lib/supabase/server";
-import { verifySessionToken, SESSION_COOKIE } from "@/lib/auth/session";
+import { getCurrentUser } from "@/lib/auth/guards";
 import BacktestButton from "./BacktestButton";
 import LogoutButton from "./LogoutButton";
 import SignalsTable, { type SignalRow } from "./SignalsTable";
+import AdminMenu from "./AdminMenu";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -126,8 +126,8 @@ function computeStats(rows: Row[]): Stats {
 }
 
 export default async function DashboardPage() {
-  const c = await cookies();
-  const session = await verifySessionToken(c.get(SESSION_COOKIE)?.value ?? null);
+  const me = await getCurrentUser();
+  const isAdmin = Boolean(me?.is_admin);
   const rows = await loadRows();
   const stats = computeStats(rows);
 
@@ -147,20 +147,9 @@ export default async function DashboardPage() {
           >
             🔥 Trending
           </Link>
-          <Link
-            href="/dashboard/users"
-            className="rounded-lg border border-crypto-border bg-crypto-panel px-4 py-2 text-sm font-semibold text-slate-200 hover:bg-black/30"
-          >
-            👥 Users
-          </Link>
-          <Link
-            href="/dashboard/schedule"
-            className="rounded-lg border border-crypto-border bg-crypto-panel px-4 py-2 text-sm font-semibold text-slate-200 hover:bg-black/30"
-          >
-            ⏰ Schedule
-          </Link>
-          <BacktestButton />
-          <LogoutButton username={session?.un} />
+          {isAdmin && <AdminMenu />}
+          {isAdmin && <BacktestButton />}
+          <LogoutButton username={me?.username} />
         </div>
       </header>
 

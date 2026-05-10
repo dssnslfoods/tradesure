@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { getSupabaseAdmin } from "@/lib/supabase/server";
+import { isCurrentUserAdmin } from "@/lib/auth/guards";
 
 interface BacktestRunResult {
   ok: boolean;
@@ -16,6 +17,9 @@ interface BacktestRunResult {
 }
 
 export async function runBacktest(mode: "new" | "all"): Promise<BacktestRunResult> {
+  if (!(await isCurrentUserAdmin())) {
+    return { ok: false, error: "admin only" };
+  }
   const base =
     process.env.NEXT_PUBLIC_SITE_URL ??
     process.env.URL ??

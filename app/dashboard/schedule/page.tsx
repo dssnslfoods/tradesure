@@ -1,5 +1,7 @@
 import Link from "next/link";
+import { redirect } from "next/navigation";
 import { getScheduleConfig, listRecentRuns } from "@/lib/schedule/settings";
+import { getCurrentUser } from "@/lib/auth/guards";
 import ScheduleControls from "./ScheduleControls";
 
 export const dynamic = "force-dynamic";
@@ -24,6 +26,25 @@ function triggerBadge(t: string) {
 }
 
 export default async function SchedulePage() {
+  const me = await getCurrentUser();
+  if (!me) redirect("/login?next=/dashboard/schedule");
+  if (!me.is_admin) {
+    return (
+      <main className="mx-auto max-w-3xl px-4 py-20 text-center">
+        <h1 className="text-2xl font-bold text-rose-300">⛔ Access denied</h1>
+        <p className="mt-2 text-sm text-slate-400">
+          หน้านี้สำหรับ admin เท่านั้น
+        </p>
+        <Link
+          href="/dashboard"
+          className="mt-6 inline-block rounded-lg border border-crypto-border bg-crypto-panel px-4 py-2 text-sm text-slate-200 hover:bg-black/30"
+        >
+          ← กลับไป Dashboard
+        </Link>
+      </main>
+    );
+  }
+
   const config = await getScheduleConfig();
   const runs = await listRecentRuns(20);
 
