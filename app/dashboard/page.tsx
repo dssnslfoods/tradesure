@@ -4,6 +4,7 @@ import SignalsTable, { type SignalRow } from "./SignalsTable";
 import BacktestButton from "./BacktestButton";
 import StatTile from "@/components/ui/StatTile";
 import Icon from "@/components/ui/Icon";
+import LivePrices from "@/components/ui/LivePrices";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -114,6 +115,11 @@ export default async function DashboardPage() {
     equitySpark.push(acc);
   }
 
+  // Unique symbols currently monitored (for live price ticker)
+  const monitoredSymbols = Array.from(new Set(rows.map((r) => r.symbol))).filter(
+    (s) => s.endsWith("USDT")
+  );
+
   return (
     <>
       {/* Hero */}
@@ -133,6 +139,13 @@ export default async function DashboardPage() {
           </div>
         )}
       </div>
+
+      {/* Live prices ticker */}
+      {monitoredSymbols.length > 0 && (
+        <div className="mb-5">
+          <LivePrices symbols={monitoredSymbols} />
+        </div>
+      )}
 
       {/* KPI tiles */}
       <section className="mb-7 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
