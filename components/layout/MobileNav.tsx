@@ -16,6 +16,9 @@ const PRIMARY: NavItem[] = [
   { href: "/dashboard/analytics", label: "Analytics", icon: "device-analytics" },
   { href: "/dashboard/trending", label: "Trending", icon: "flame" },
 ];
+const RESOURCES: NavItem[] = [
+  { href: "/dashboard/help", label: "Help & Guides", icon: "info" },
+];
 const ADMIN: NavItem[] = [
   { href: "/dashboard/users", label: "Users & Telegram", icon: "users" },
   { href: "/dashboard/schedule", label: "Schedule", icon: "clock" },
@@ -95,6 +98,15 @@ export default function MobileNav({
             <nav className="flex-1 space-y-1 overflow-y-auto px-3 pb-5">
               <div className="px-3 py-2 eyebrow">Workspace</div>
               {PRIMARY.map((item) => (
+                <DrawerLink
+                  key={item.href}
+                  item={item}
+                  active={isActive(pathname, item.href)}
+                />
+              ))}
+
+              <div className="mt-6 px-3 py-2 eyebrow">Resources</div>
+              {RESOURCES.map((item) => (
                 <DrawerLink
                   key={item.href}
                   item={item}

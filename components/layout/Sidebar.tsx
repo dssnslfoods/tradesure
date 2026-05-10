@@ -19,6 +19,10 @@ const PRIMARY: NavItem[] = [
   { href: "/dashboard/trending", label: "Trending", icon: "flame" },
 ];
 
+const RESOURCES: NavItem[] = [
+  { href: "/dashboard/help", label: "Help & Guides", icon: "info" },
+];
+
 const ADMIN: NavItem[] = [
   { href: "/dashboard/users", label: "Users & Telegram", icon: "users", adminOnly: true },
   { href: "/dashboard/schedule", label: "Schedule", icon: "clock", adminOnly: true },
@@ -51,6 +55,11 @@ export default function Sidebar({
       <nav className="flex-1 space-y-1 px-3">
         <div className="px-3 py-2 eyebrow">Workspace</div>
         {PRIMARY.map((item) => (
+          <NavLink key={item.href} item={item} active={isActive(pathname, item.href)} />
+        ))}
+
+        <div className="mt-6 px-3 py-2 eyebrow">Resources</div>
+        {RESOURCES.map((item) => (
           <NavLink key={item.href} item={item} active={isActive(pathname, item.href)} />
         ))}
 
