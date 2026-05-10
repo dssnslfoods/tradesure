@@ -1,10 +1,9 @@
-import Link from "next/link";
 import { getSupabaseAdmin } from "@/lib/supabase/server";
 import { getCurrentUser } from "@/lib/auth/guards";
-import BacktestButton from "./BacktestButton";
-import LogoutButton from "./LogoutButton";
 import SignalsTable, { type SignalRow } from "./SignalsTable";
-import AdminMenu from "./AdminMenu";
+import BacktestButton from "./BacktestButton";
+import StatTile from "@/components/ui/StatTile";
+import Icon from "@/components/ui/Icon";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -29,16 +28,7 @@ interface Row {
   stop_loss_num: number | null;
   take_profit_1_num: number | null;
   take_profit_2_num: number | null;
-  tradingview_signals: {
-    signal: string;
-    price: number | null;
-  } | null;
-}
-
-function fmtPnl(p: number | null) {
-  if (p === null || p === undefined) return "-";
-  const sign = p >= 0 ? "+" : "";
-  return `${sign}${p.toFixed(2)}%`;
+  tradingview_signals: { signal: string; price: number | null } | null;
 }
 
 async function loadRows(): Promise<Row[]> {
@@ -70,59 +60,39 @@ interface Stats {
   pending: number;
   skipped: number;
   winRate: number | null;
-  avgPnl: number | null;
   totalPnl: number;
 }
 
 function computeStats(rows: Row[]): Stats {
-  const stats: Stats = {
-    total: rows.length,
-    wins: 0,
-    losses: 0,
-    open: 0,
-    pending: 0,
-    skipped: 0,
-    winRate: null,
-    avgPnl: null,
-    totalPnl: 0,
-  };
+  const s: Stats = { total: rows.length, wins: 0, losses: 0, open: 0, pending: 0, skipped: 0, winRate: null, totalPnl: 0 };
   let pnlSum = 0;
-  let pnlN = 0;
   for (const r of rows) {
     switch (r.outcome) {
       case "WIN_TP1":
       case "WIN_TP2":
-        stats.wins++;
+        s.wins++;
         break;
       case "LOSS_SL":
-        stats.losses++;
+        s.losses++;
         break;
       case "OPEN":
-        stats.open++;
+        s.open++;
         break;
       case "PENDING":
-        stats.pending++;
+        s.pending++;
         break;
       case "SKIP_WAIT":
       case "NO_DATA":
       case "ERROR":
-        stats.skipped++;
+        s.skipped++;
         break;
     }
-    if (typeof r.pnl_pct === "number") {
-      pnlSum += r.pnl_pct;
-      pnlN++;
-    }
+    if (typeof r.pnl_pct === "number") pnlSum += r.pnl_pct;
   }
-  const decided = stats.wins + stats.losses;
-  if (decided > 0) {
-    stats.winRate = Math.round((stats.wins / decided) * 1000) / 10;
-  }
-  if (pnlN > 0) {
-    stats.avgPnl = Math.round((pnlSum / pnlN) * 100) / 100;
-    stats.totalPnl = Math.round(pnlSum * 100) / 100;
-  }
-  return stats;
+  const decided = s.wins + s.losses;
+  if (decided > 0) s.winRate = Math.round((s.wins / decided) * 1000) / 10;
+  s.totalPnl = Math.round(pnlSum * 100) / 100;
+  return s;
 }
 
 export default async function DashboardPage() {
@@ -131,64 +101,79 @@ export default async function DashboardPage() {
   const rows = await loadRows();
   const stats = computeStats(rows);
 
+  // Build a tiny equity-like sparkline from the last decided signals
+  const sparkSeed = rows
+    .filter((r) => typeof r.pnl_pct === "number")
+    .slice(0, 30)
+    .reverse()
+    .map((r) => r.pnl_pct as number);
+  const equitySpark: number[] = [];
+  let acc = 0;
+  for (const v of sparkSeed) {
+    acc += v;
+    equitySpark.push(acc);
+  }
+
   return (
-    <main className="mx-auto max-w-7xl px-4 py-10 sm:px-6">
-      <header className="mb-6 flex flex-wrap items-end justify-between gap-4">
+    <>
+      {/* Hero */}
+      <div className="mb-7 flex flex-wrap items-end justify-between gap-4">
         <div>
-          <h1 className="text-3xl font-bold tracking-tight">
-            📈 <span className="text-slate-100">Tradesure</span>{" "}
-            <span className="bg-gradient-to-r from-emerald-400 to-sky-400 bg-clip-text text-sm font-semibold uppercase tracking-widest text-transparent">
-              by D2infinite
-            </span>
+          <div className="eyebrow">Live signals · Last 24h</div>
+          <h1 className="mt-1 text-[32px] font-bold tracking-tightest text-ink-primary">
+            Signal Dashboard
           </h1>
-          <p className="mt-1 text-sm text-slate-400">
-            Latest TradingView signals enriched with AI analysis and backtested against real market data.
+          <p className="mt-1 text-[13px] text-ink-secondary">
+            TradingView signals enriched with AI analysis and backtested against Binance market data.
           </p>
         </div>
-        <div className="flex items-center gap-3">
-          <Link
-            href="/dashboard/analytics"
-            className="rounded-lg border border-crypto-border bg-crypto-panel px-4 py-2 text-sm font-semibold text-slate-200 hover:bg-black/30"
-          >
-            📊 Analytics
-          </Link>
-          <Link
-            href="/dashboard/trending"
-            className="rounded-lg border border-crypto-border bg-crypto-panel px-4 py-2 text-sm font-semibold text-slate-200 hover:bg-black/30"
-          >
-            🔥 Trending
-          </Link>
-          {isAdmin && <AdminMenu />}
-          {isAdmin && <BacktestButton />}
-          <LogoutButton username={me?.username} />
-        </div>
-      </header>
+        {isAdmin && (
+          <div className="flex items-center gap-2">
+            <BacktestButton />
+          </div>
+        )}
+      </div>
 
-      <section className="mb-6 grid grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-7">
-        <StatCard label="Total" value={String(stats.total)} />
-        <StatCard label="Wins" value={String(stats.wins)} accent="emerald" />
-        <StatCard label="Losses" value={String(stats.losses)} accent="rose" />
-        <StatCard label="Open" value={String(stats.open)} accent="sky" />
-        <StatCard
-          label="W:L Ratio"
-          value={
-            stats.losses === 0
-              ? stats.wins > 0
-                ? `${stats.wins}:0`
-                : "-"
-              : `${(stats.wins / stats.losses).toFixed(2)}:1`
-          }
-          accent={stats.wins > stats.losses ? "emerald" : "rose"}
+      {/* KPI tiles */}
+      <section className="mb-7 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
+        <StatTile
+          label="Total signals"
+          value={stats.total}
+          icon="device-analytics"
+          tone="neutral"
         />
-        <StatCard
+        <StatTile
+          label="Wins"
+          value={stats.wins}
+          icon="circle-check"
+          tone="buy"
+          sub={`${stats.wins + stats.losses > 0 ? `${stats.winRate}% win rate` : "—"}`}
+        />
+        <StatTile
+          label="Losses"
+          value={stats.losses}
+          icon="circle-x"
+          tone="sell"
+        />
+        <StatTile label="Open" value={stats.open} icon="clock" tone="info" />
+        <StatTile
           label="Win rate"
-          value={stats.winRate === null ? "-" : `${stats.winRate}%`}
-          accent={stats.winRate && stats.winRate >= 50 ? "emerald" : "rose"}
+          value={stats.winRate ?? 0}
+          decimals={1}
+          suffix="%"
+          icon="target"
+          tone={stats.winRate !== null && stats.winRate >= 50 ? "buy" : "warn"}
         />
-        <StatCard
+        <StatTile
           label="Total PnL"
-          value={fmtPnl(stats.totalPnl)}
-          accent={stats.totalPnl >= 0 ? "emerald" : "rose"}
+          value={stats.totalPnl}
+          decimals={2}
+          prefix={stats.totalPnl >= 0 ? "+" : ""}
+          suffix="%"
+          icon="trending-up"
+          tone={stats.totalPnl >= 0 ? "buy" : "sell"}
+          sparkline={equitySpark.length > 1 ? equitySpark : undefined}
+          sparkColor={stats.totalPnl >= 0 ? "var(--buy)" : "var(--sell)"}
         />
       </section>
 
@@ -217,34 +202,10 @@ export default async function DashboardPage() {
         }))}
       />
 
-      <p className="mt-4 text-xs text-slate-500">
-        Backtest uses Binance public klines. First-touch model: if TP and SL are
-        both hit in the same bar, the SL is assumed first (pessimistic). Window =
-        first 200 bars after signal time.
+      <p className="mt-6 flex items-center gap-2 text-[11px] text-ink-muted">
+        <Icon name="info" size={12} />
+        Backtest uses Binance public klines. First-touch model: SL assumed first when both hit in same bar (pessimistic). Window = 200 bars after signal time.
       </p>
-    </main>
-  );
-}
-
-function StatCard({
-  label,
-  value,
-  accent = "slate",
-}: {
-  label: string;
-  value: string;
-  accent?: "emerald" | "rose" | "sky" | "slate";
-}) {
-  const tone = {
-    emerald: "text-emerald-300",
-    rose: "text-rose-300",
-    sky: "text-sky-300",
-    slate: "text-slate-200",
-  }[accent];
-  return (
-    <div className="rounded-lg border border-crypto-border bg-crypto-panel p-3">
-      <div className="text-[10px] uppercase tracking-wider text-slate-500">{label}</div>
-      <div className={`mt-1 text-xl font-semibold tabular-nums ${tone}`}>{value}</div>
-    </div>
+    </>
   );
 }

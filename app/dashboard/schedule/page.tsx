@@ -30,18 +30,13 @@ export default async function SchedulePage() {
   if (!me) redirect("/login?next=/dashboard/schedule");
   if (!me.is_admin) {
     return (
-      <main className="mx-auto max-w-3xl px-4 py-20 text-center">
-        <h1 className="text-2xl font-bold text-rose-300">⛔ Access denied</h1>
-        <p className="mt-2 text-sm text-slate-400">
-          หน้านี้สำหรับ admin เท่านั้น
-        </p>
-        <Link
-          href="/dashboard"
-          className="mt-6 inline-block rounded-lg border border-crypto-border bg-crypto-panel px-4 py-2 text-sm text-slate-200 hover:bg-black/30"
-        >
-          ← กลับไป Dashboard
+      <div className="mx-auto max-w-md py-20 text-center">
+        <h1 className="text-[22px] font-bold text-sig-sell">Access denied</h1>
+        <p className="mt-2 text-[13px] text-ink-muted">หน้านี้สำหรับ admin เท่านั้น</p>
+        <Link href="/dashboard" className="btn btn-secondary mt-6 inline-flex">
+          กลับไป Dashboard
         </Link>
-      </main>
+      </div>
     );
   }
 
@@ -53,29 +48,26 @@ export default async function SchedulePage() {
   const errorRuns = runs.filter((r) => r.error).length;
 
   return (
-    <main className="mx-auto max-w-5xl px-4 py-10 sm:px-6">
-      <header className="mb-6 flex flex-wrap items-end justify-between gap-3">
+    <>
+      <header className="mb-7 flex flex-wrap items-end justify-between gap-3">
         <div>
-          <Link
-            href="/dashboard"
-            className="text-xs text-slate-400 hover:text-slate-200"
-          >
-            ← Back to dashboard
-          </Link>
-          <h1 className="mt-2 text-3xl font-bold tracking-tight">
-            ⏰ Backtest schedule
+          <div className="eyebrow">Admin · Auto-evaluator</div>
+          <h1 className="mt-1 text-[32px] font-bold tracking-tightest text-ink-primary">
+            Backtest Schedule
           </h1>
-          <p className="mt-1 text-sm text-slate-400">
+          <p className="mt-1 text-[13px] text-ink-secondary">
             Pause / resume the auto-evaluator and view recent runs.
           </p>
         </div>
-        <div className="text-right text-xs text-slate-400">
-          <div>Last run: {fmtTime(config.last_run_at)}</div>
+        <div className="text-right text-[11px] text-ink-muted">
+          <div>Last run: <span className="font-mono text-ink-secondary">{fmtTime(config.last_run_at)}</span></div>
           {config.last_result && (
-            <div>
-              {config.last_result.evaluated} evaluated · {config.last_result.win}W /{" "}
-              {config.last_result.loss}L / {config.last_result.open}O · win-rate{" "}
-              {config.last_result.win_rate_pct ?? "-"}%
+            <div className="mt-1">
+              {config.last_result.evaluated} evaluated ·{" "}
+              <span className="text-sig-buy">{config.last_result.win}W</span> /{" "}
+              <span className="text-sig-sell">{config.last_result.loss}L</span> /{" "}
+              <span className="text-sig-info">{config.last_result.open}O</span> ·{" "}
+              win-rate {config.last_result.win_rate_pct ?? "-"}%
             </div>
           )}
         </div>
@@ -176,7 +168,7 @@ export default async function SchedulePage() {
           ทันที โดยไม่ทำงานจริง — Cloud Scheduler ไม่ต้องหยุด
         </p>
       </section>
-    </main>
+    </>
   );
 }
 

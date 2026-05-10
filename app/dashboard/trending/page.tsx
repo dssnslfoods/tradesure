@@ -1,4 +1,3 @@
-import Link from "next/link";
 import { cookies } from "next/headers";
 import { getSupabaseAdmin } from "@/lib/supabase/server";
 import { verifySessionToken, SESSION_COOKIE } from "@/lib/auth/session";
@@ -121,20 +120,18 @@ export default async function TrendingPage({
     : "-";
 
   return (
-    <main className="mx-auto max-w-7xl px-4 py-10 sm:px-6">
-      <header className="mb-6 flex flex-wrap items-end justify-between gap-4">
+    <>
+      <header className="mb-7 flex flex-wrap items-end justify-between gap-4">
         <div>
-          <h1 className="text-3xl font-bold tracking-tight">🔥 Trending crypto</h1>
-          <p className="mt-1 text-sm text-slate-400">
-            Top 5 USDT pairs จาก Binance (24h) — refresh ทุก 30 วินาที · ข้อมูลล่าสุด {fetchedAtStr}
+          <div className="eyebrow">Live · Binance USDT pairs</div>
+          <h1 className="mt-1 text-[32px] font-bold tracking-tightest text-ink-primary">
+            Trending Crypto
+          </h1>
+          <p className="mt-1 text-[13px] text-ink-secondary">
+            Top 5 ในแต่ละหมวด · refresh ทุก 30 วินาที · ข้อมูลล่าสุด{" "}
+            <span className="font-mono text-ink-primary">{fetchedAtStr}</span>
           </p>
         </div>
-        <Link
-          href="/dashboard"
-          className="rounded-lg border border-crypto-border bg-crypto-panel px-4 py-2 text-sm text-slate-200 hover:bg-black/30"
-        >
-          ← Dashboard
-        </Link>
       </header>
 
       {err && (
@@ -158,11 +155,19 @@ export default async function TrendingPage({
         />
       )}
 
-      <p className="mt-4 text-xs text-slate-500">
-        🟢 = pump (+ 24h) · 🔴 = dump (- 24h) · ตัวเลขเป็น quote volume USDT.
-        ตัด stablecoin pairs และ leveraged tokens (UP/DOWN/BULL/BEAR) ออก.
+      <p className="mt-4 flex flex-wrap items-center gap-2 text-[11px] text-ink-muted">
+        <span className="inline-flex items-center gap-1">
+          <span className="h-1.5 w-1.5 rounded-full bg-sig-buy" />
+          pump (+24h)
+        </span>
+        <span className="inline-flex items-center gap-1">
+          <span className="h-1.5 w-1.5 rounded-full bg-sig-sell" />
+          dump (-24h)
+        </span>
+        <span className="text-ink-faint">·</span>
+        <span>ตัวเลขเป็น quote volume USDT — ตัด stablecoin + leveraged tokens (UP/DOWN/BULL/BEAR)</span>
       </p>
-    </main>
+    </>
   );
 }
 

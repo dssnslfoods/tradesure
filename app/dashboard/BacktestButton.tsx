@@ -33,22 +33,14 @@ export default function BacktestButton() {
   return (
     <div className="flex flex-col items-end gap-2">
       <div className="flex gap-2">
-        <button
-          onClick={() => run("new")}
-          disabled={pending}
-          className="rounded-lg bg-crypto-accent px-4 py-2 text-sm font-semibold text-black hover:opacity-90 disabled:opacity-60"
-        >
-          {pending ? "Refreshing…" : "Run backtest (new)"}
+        <button onClick={() => run("new")} disabled={pending} className="btn btn-primary">
+          {pending ? "Refreshing…" : "Run backtest"}
         </button>
-        <button
-          onClick={() => run("all")}
-          disabled={pending}
-          className="rounded-lg border border-crypto-border bg-crypto-panel px-4 py-2 text-sm font-semibold text-slate-200 hover:bg-black/30 disabled:opacity-60"
-        >
+        <button onClick={() => run("all")} disabled={pending} className="btn btn-secondary">
           Re-evaluate all
         </button>
       </div>
-      {status && <p className="text-xs text-slate-400">{status}</p>}
+      {status && <p className="text-[11px] text-ink-muted">{status}</p>}
     </div>
   );
 }

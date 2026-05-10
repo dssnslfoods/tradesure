@@ -1,4 +1,3 @@
-import Link from "next/link";
 import { redirect } from "next/navigation";
 import { getSupabaseAdmin } from "@/lib/supabase/server";
 import { getCurrentUser } from "@/lib/auth/guards";
@@ -87,20 +86,15 @@ export default async function AnalyticsPage() {
       : s.profitFactor.toFixed(2);
 
   return (
-    <main className="mx-auto max-w-7xl px-4 py-10 sm:px-6">
-      <header className="mb-6 flex flex-wrap items-end justify-between gap-4">
-        <div>
-          <h1 className="text-3xl font-bold tracking-tight">📊 Analytics</h1>
-          <p className="mt-1 text-sm text-slate-400">
-            สถิติและกราฟจาก signal {rows.length} รายการ
-          </p>
-        </div>
-        <Link
-          href="/dashboard"
-          className="rounded-lg border border-crypto-border bg-crypto-panel px-4 py-2 text-sm text-slate-200 hover:bg-black/30"
-        >
-          ← Dashboard
-        </Link>
+    <>
+      <header className="mb-7">
+        <div className="eyebrow">Performance · {rows.length} signals</div>
+        <h1 className="mt-1 text-[32px] font-bold tracking-tightest text-ink-primary">
+          Analytics
+        </h1>
+        <p className="mt-1 text-[13px] text-ink-secondary">
+          สถิติและกราฟ — อัปเดตอัตโนมัติเมื่อมี signal ใหม่หรือ backtest รัน
+        </p>
       </header>
 
       {/* ===== KPI cards ===== */}
@@ -205,10 +199,10 @@ export default async function AnalyticsPage() {
         <HourOfDayHeatmap data={a.byHour} />
       </div>
 
-      <p className="mt-6 text-xs text-slate-500">
-        ⚠️ <i>ข้อมูลนับเฉพาะ signal ที่ outcome เป็น WIN_TP1, WIN_TP2 หรือ LOSS_SL — ไม่รวม PENDING / OPEN / NO TRADE</i>
+      <p className="mt-6 text-[11px] italic text-ink-muted">
+        ข้อมูลนับเฉพาะ signal ที่ outcome เป็น WIN_TP1, WIN_TP2 หรือ LOSS_SL — ไม่รวม PENDING / OPEN / NO TRADE
       </p>
-    </main>
+    </>
   );
 }
 
