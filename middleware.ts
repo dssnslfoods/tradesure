@@ -11,6 +11,7 @@ const PUBLIC_PATH_PREFIXES = [
   "/api/telegram",     // Telegram bot webhook (validates secret_token header)
   "/api/backtest",     // Cloud Scheduler / dashboard (validates secret)
   "/api/schedule",     // Schedule mgmt (validates secret on PATCH)
+  "/api/trending",     // Cloud Scheduler trending Top-3 alert (validates secret)
   "/_next",
   "/favicon",
   "/robots.txt",

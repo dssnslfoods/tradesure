@@ -1,6 +1,10 @@
 // Binance public 24h ticker — no API key needed.
 // Filters to USDT spot pairs and sorts by various trending criteria.
 
+import { tagFor, type CoinTag } from "@/lib/curated/coinTags";
+
+export type FilterMode = "all" | "blue_chip" | "no_meme";
+
 export interface BinanceTicker {
   symbol: string;
   base: string;          // e.g. "BTC" from "BTCUSDT"
@@ -12,6 +16,7 @@ export interface BinanceTicker {
   quoteVolume: number;   // USDT volume
   count: number;         // number of trades
   openPrice: number;
+  tag: CoinTag;
 }
 
 interface RawTicker {
@@ -86,9 +91,34 @@ export async function fetchAllUsdtTickers(): Promise<BinanceTicker[]> {
       quoteVolume,
       count: t.count,
       openPrice: Number(t.openPrice),
+      tag: tagFor(base),
     });
   }
   return tickers;
+}
+
+// Fetch 24x 1h klines for a symbol — used to draw sparklines.
+export async function fetchSparkline(
+  symbol: string,
+  hours = 24
+): Promise<number[]> {
+  const url = new URL("https://api.binance.com/api/v3/klines");
+  url.searchParams.set("symbol", symbol);
+  url.searchParams.set("interval", "1h");
+  url.searchParams.set("limit", String(hours));
+  const res = await fetch(url, { next: { revalidate: 60 } });
+  if (!res.ok) return [];
+  const raw = (await res.json()) as Array<unknown[]>;
+  return raw.map((k) => Number(k[4])).filter((n) => Number.isFinite(n));
+}
+
+export async function fetchSparklines(
+  symbols: string[]
+): Promise<Record<string, number[]>> {
+  const results = await Promise.all(
+    symbols.map(async (s) => [s, await fetchSparkline(s)] as const)
+  );
+  return Object.fromEntries(results);
 }
 
 export interface TrendingBuckets {
@@ -101,10 +131,16 @@ export interface TrendingBuckets {
 
 export async function getTrendingBuckets(
   topN = 5,
-  minVolumeUsdt = 5_000_000 // ignore microcap noise
+  minVolumeUsdt = 5_000_000, // ignore microcap noise
+  filter: FilterMode = "all"
 ): Promise<TrendingBuckets> {
   const tickers = await fetchAllUsdtTickers();
-  const liquid = tickers.filter((t) => t.quoteVolume >= minVolumeUsdt);
+  let liquid = tickers.filter((t) => t.quoteVolume >= minVolumeUsdt);
+  if (filter === "blue_chip") {
+    liquid = liquid.filter((t) => t.tag === "blue_chip");
+  } else if (filter === "no_meme") {
+    liquid = liquid.filter((t) => t.tag !== "memecoin");
+  }
 
   const gainers = [...liquid]
     .sort((a, b) => b.priceChangePercent - a.priceChangePercent)
