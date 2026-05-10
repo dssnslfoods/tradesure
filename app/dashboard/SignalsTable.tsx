@@ -270,7 +270,13 @@ function fmtPnl(p: number | null) {
   return `${sign}${p.toFixed(2)}%`;
 }
 
-export default function SignalsTable({ rows }: { rows: SignalRow[] }) {
+export default function SignalsTable({
+  rows,
+  isAdmin = false,
+}: {
+  rows: SignalRow[];
+  isAdmin?: boolean;
+}) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -324,52 +330,58 @@ export default function SignalsTable({ rows }: { rows: SignalRow[] }) {
 
   return (
     <div className="overflow-hidden rounded-xl border border-crypto-border bg-crypto-panel shadow-lg">
-      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-crypto-border bg-black/20 px-4 py-2 text-sm">
-        <div className="text-slate-400">
-          {selected.size > 0 ? (
-            <span>
-              เลือก <span className="font-semibold text-slate-200">{selected.size}</span> รายการ
-            </span>
-          ) : (
-            <span>เลือกหลายรายการเพื่อลบพร้อมกัน</span>
-          )}
-          {err ? <span className="ml-3 text-rose-400">· {err}</span> : null}
-        </div>
-        <div className="flex items-center gap-2">
-          {selected.size > 0 && (
+      {isAdmin && (
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-crypto-border bg-black/20 px-4 py-2 text-sm">
+          <div className="text-slate-400">
+            {selected.size > 0 ? (
+              <span>
+                เลือก <span className="font-semibold text-slate-200">{selected.size}</span> รายการ
+              </span>
+            ) : (
+              <span>เลือกหลายรายการเพื่อลบพร้อมกัน</span>
+            )}
+            {err ? <span className="ml-3 text-rose-400">· {err}</span> : null}
+          </div>
+          <div className="flex items-center gap-2">
+            {selected.size > 0 && (
+              <button
+                type="button"
+                onClick={() => setSelected(new Set())}
+                disabled={pending}
+                className="rounded border border-slate-500/40 bg-slate-500/10 px-3 py-1 text-xs font-semibold text-slate-300 hover:bg-slate-500/20 disabled:opacity-40"
+              >
+                Clear
+              </button>
+            )}
             <button
               type="button"
-              onClick={() => setSelected(new Set())}
-              disabled={pending}
-              className="rounded border border-slate-500/40 bg-slate-500/10 px-3 py-1 text-xs font-semibold text-slate-300 hover:bg-slate-500/20 disabled:opacity-40"
+              onClick={onDeleteSelected}
+              disabled={pending || selected.size === 0}
+              className="rounded border border-rose-500/40 bg-rose-500/10 px-3 py-1 text-xs font-semibold text-rose-300 hover:bg-rose-500/20 disabled:cursor-not-allowed disabled:opacity-40"
             >
-              Clear
+              {pending ? "Deleting…" : `🗑 Delete selected${selected.size ? ` (${selected.size})` : ""}`}
             </button>
-          )}
-          <button
-            type="button"
-            onClick={onDeleteSelected}
-            disabled={pending || selected.size === 0}
-            className="rounded border border-rose-500/40 bg-rose-500/10 px-3 py-1 text-xs font-semibold text-rose-300 hover:bg-rose-500/20 disabled:cursor-not-allowed disabled:opacity-40"
-          >
-            {pending ? "Deleting…" : `🗑 Delete selected${selected.size ? ` (${selected.size})` : ""}`}
-          </button>
+          </div>
         </div>
-      </div>
+      )}
 
-      {/* Header row: checkbox-all + column legend */}
+      {/* Header row: checkbox-all + column legend (admin only) */}
       <div className="flex items-center gap-3 border-b border-crypto-border bg-black/30 px-4 py-2 text-[10px] uppercase tracking-wider text-slate-500">
-        <input
-          type="checkbox"
-          checked={allSelected}
-          ref={(el) => {
-            if (el) el.indeterminate = someSelected;
-          }}
-          onChange={toggleAll}
-          className="h-4 w-4 cursor-pointer accent-rose-500"
-          aria-label="Select all"
-        />
-        <span>เลือกทั้งหมด</span>
+        {isAdmin && (
+          <>
+            <input
+              type="checkbox"
+              checked={allSelected}
+              ref={(el) => {
+                if (el) el.indeterminate = someSelected;
+              }}
+              onChange={toggleAll}
+              className="h-4 w-4 cursor-pointer accent-rose-500"
+              aria-label="Select all"
+            />
+            <span>เลือกทั้งหมด</span>
+          </>
+        )}
         <span className="ml-auto">{rows.length} รายการ</span>
       </div>
 
@@ -387,18 +399,22 @@ export default function SignalsTable({ rows }: { rows: SignalRow[] }) {
           return (
             <div
               key={r.id}
-              className={`grid grid-cols-[auto_1fr_auto] items-start gap-3 px-4 py-3 transition hover:bg-black/20 ${
+              className={`grid ${
+                isAdmin ? "grid-cols-[auto_1fr_auto]" : "grid-cols-[1fr]"
+              } items-start gap-3 px-4 py-3 transition hover:bg-black/20 ${
                 isSel ? "bg-rose-500/5" : ""
               }`}
             >
-              {/* Left: checkbox */}
-              <input
-                type="checkbox"
-                checked={isSel}
-                onChange={() => toggleOne(r.signal_id)}
-                className="mt-1 h-4 w-4 cursor-pointer accent-rose-500"
-                aria-label={`Select row ${r.symbol} ${fmtTime(r.created_at)}`}
-              />
+              {/* Left: checkbox (admin only) */}
+              {isAdmin && (
+                <input
+                  type="checkbox"
+                  checked={isSel}
+                  onChange={() => toggleOne(r.signal_id)}
+                  className="mt-1 h-4 w-4 cursor-pointer accent-rose-500"
+                  aria-label={`Select row ${r.symbol} ${fmtTime(r.created_at)}`}
+                />
+              )}
 
               {/* Middle: all signal info */}
               <div className="min-w-0 space-y-2">
@@ -478,29 +494,31 @@ export default function SignalsTable({ rows }: { rows: SignalRow[] }) {
                 </div>
               </div>
 
-              {/* Right: actions */}
-              <div className="flex flex-col gap-1 sm:flex-row">
-                <button
-                  type="button"
-                  onClick={() => setEditing(r)}
-                  disabled={pending}
-                  className="rounded border border-sky-500/40 bg-sky-500/10 px-2 py-1 text-xs font-semibold text-sky-300 hover:bg-sky-500/20 disabled:opacity-40"
-                  title="Edit SL/TP levels"
-                >
-                  ✏️
-                </button>
-                <button
-                  type="button"
-                  onClick={() =>
-                    onDeleteOne(r.signal_id, `${r.symbol} ${fmtTime(r.created_at)}`)
-                  }
-                  disabled={pending}
-                  className="rounded border border-rose-500/40 bg-rose-500/10 px-2 py-1 text-xs font-semibold text-rose-300 hover:bg-rose-500/20 disabled:opacity-40"
-                  title="Delete signal permanently"
-                >
-                  🗑
-                </button>
-              </div>
+              {/* Right: actions (admin only) */}
+              {isAdmin && (
+                <div className="flex flex-col gap-1 sm:flex-row">
+                  <button
+                    type="button"
+                    onClick={() => setEditing(r)}
+                    disabled={pending}
+                    className="rounded border border-sky-500/40 bg-sky-500/10 px-2 py-1 text-xs font-semibold text-sky-300 hover:bg-sky-500/20 disabled:opacity-40"
+                    title="Edit SL/TP levels"
+                  >
+                    ✏️
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      onDeleteOne(r.signal_id, `${r.symbol} ${fmtTime(r.created_at)}`)
+                    }
+                    disabled={pending}
+                    className="rounded border border-rose-500/40 bg-rose-500/10 px-2 py-1 text-xs font-semibold text-rose-300 hover:bg-rose-500/20 disabled:opacity-40"
+                    title="Delete signal permanently"
+                  >
+                    🗑
+                  </button>
+                </div>
+              )}
             </div>
           );
         })}

@@ -43,6 +43,9 @@ export async function runBacktest(mode: "new" | "all"): Promise<BacktestRunResul
 }
 
 export async function deleteSignal(signalId: string): Promise<{ ok: boolean; error?: string }> {
+  if (!(await isCurrentUserAdmin())) {
+    return { ok: false, error: "admin only" };
+  }
   if (!signalId) return { ok: false, error: "missing signalId" };
   try {
     const supabase = getSupabaseAdmin();
@@ -69,6 +72,9 @@ export async function updateSignalLevels(
     entry_high?: number | null;
   }
 ): Promise<{ ok: boolean; error?: string }> {
+  if (!(await isCurrentUserAdmin())) {
+    return { ok: false, error: "admin only" };
+  }
   if (!analysisId) return { ok: false, error: "missing analysisId" };
 
   // Sanity-check the numbers (must be positive finite, TP/SL on correct sides
@@ -116,6 +122,9 @@ export async function updateSignalLevels(
 }
 
 export async function deleteSignals(signalIds: string[]): Promise<{ ok: boolean; deleted?: number; error?: string }> {
+  if (!(await isCurrentUserAdmin())) {
+    return { ok: false, error: "admin only" };
+  }
   const ids = (signalIds ?? []).filter((s) => typeof s === "string" && s.length > 0);
   if (ids.length === 0) return { ok: false, error: "no ids provided" };
   try {

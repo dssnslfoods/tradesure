@@ -182,6 +182,7 @@ export default async function DashboardPage() {
       </section>
 
       <SignalsTable
+        isAdmin={isAdmin}
         rows={rows.map<SignalRow>((r) => ({
           id: r.id,
           signal_id: r.signal_id,
