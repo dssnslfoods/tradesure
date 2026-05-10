@@ -1,0 +1,22 @@
+<svg width="180" height="180" viewBox="0 0 180 180" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="180" y2="180" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#0f172a"/>
+      <stop offset="1" stop-color="#1e293b"/>
+    </linearGradient>
+    <linearGradient id="line" x1="20" y1="120" x2="160" y2="40" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#34d399"/>
+      <stop offset="1" stop-color="#38bdf8"/>
+    </linearGradient>
+  </defs>
+  <rect width="180" height="180" rx="40" fill="url(#bg)"/>
+  <path d="M28 120 L56 88 L84 104 L112 64 L152 36"
+        stroke="url(#line)" stroke-width="14" fill="none"
+        stroke-linejoin="round" stroke-linecap="round"/>
+  <circle cx="152" cy="36" r="11" fill="#34d399"/>
+  <text x="90" y="160" text-anchor="middle"
+        font-family="ui-sans-serif, system-ui, -apple-system, sans-serif"
+        font-size="22" font-weight="800" fill="#e2e8f0" letter-spacing="3">
+    TRADESURE
+  </text>
+</svg>

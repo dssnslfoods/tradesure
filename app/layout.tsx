@@ -2,8 +2,15 @@ import "./globals.css";
 import type { Metadata } from "next";
 
 export const metadata: Metadata = {
-  title: "Crypto AI Signal Webhook",
-  description: "TradingView → AI → Telegram",
+  title: {
+    default: "Tradesure by D2Infinite",
+    template: "%s · Tradesure",
+  },
+  description:
+    "Tradesure by D2Infinite — TradingView signals enriched with AI analysis, backtested on Binance, delivered via Telegram.",
+  applicationName: "Tradesure",
+  authors: [{ name: "Arnon Arpaket" }],
+  themeColor: "#0f172a",
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

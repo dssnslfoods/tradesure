@@ -135,7 +135,12 @@ export default async function DashboardPage() {
     <main className="mx-auto max-w-7xl px-4 py-10 sm:px-6">
       <header className="mb-6 flex flex-wrap items-end justify-between gap-4">
         <div>
-          <h1 className="text-3xl font-bold tracking-tight">📈 Crypto AI Signals</h1>
+          <h1 className="text-3xl font-bold tracking-tight">
+            📈 <span className="text-slate-100">Tradesure</span>{" "}
+            <span className="bg-gradient-to-r from-emerald-400 to-sky-400 bg-clip-text text-sm font-semibold uppercase tracking-widest text-transparent">
+              by D2infinite
+            </span>
+          </h1>
           <p className="mt-1 text-sm text-slate-400">
             Latest TradingView signals enriched with AI analysis and backtested against real market data.
           </p>
