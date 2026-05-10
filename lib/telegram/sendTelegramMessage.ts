@@ -14,13 +14,25 @@ function fmtPrice(v: string | number | undefined | null): string {
   return n.toLocaleString("en-US", { maximumFractionDigits: 8 });
 }
 
-function pctFromEntry(level: number, entry: number, bias: string): string {
+function pctFromEntry(level: number, entry: number, direction: "LONG" | "SHORT"): string {
   if (!entry || !Number.isFinite(level) || !Number.isFinite(entry)) return "";
-  const raw = bias === "LONG"
-    ? ((level - entry) / entry) * 100
-    : ((entry - level) / entry) * 100;
+  const raw =
+    direction === "LONG"
+      ? ((level - entry) / entry) * 100
+      : ((entry - level) / entry) * 100;
   const sign = raw >= 0 ? "+" : "";
   return `${sign}${raw.toFixed(2)}%`;
+}
+
+// Resolve trade direction even when AI returns WAIT.
+function resolveDirection(payload: TradingViewPayload, aiBias: string): "LONG" | "SHORT" {
+  if (aiBias === "LONG") return "LONG";
+  if (aiBias === "SHORT") return "SHORT";
+  // AI said WAIT — fall back to TradingView signal
+  const sig = String(payload.signal ?? "").toUpperCase();
+  if (sig === "BUY" || sig === "LONG") return "LONG";
+  if (sig === "SELL" || sig === "SHORT") return "SHORT";
+  return "LONG";
 }
 
 function pickNumber(...candidates: unknown[]): number | null {
@@ -37,8 +49,13 @@ export function buildTelegramMessage(
   ai: AIAnalysisResult
 ): string {
   // Prefer numeric values from Pine payload (most accurate), fall back to AI numeric.
+  // For % computation we use the signal price (the actual fill reference)
+  // rather than the lower bound of the entry zone, otherwise % can flip sign.
   const entryNum =
-    pickNumber(payload.entry_low, payload.entry, payload.price) ??
+    pickNumber(payload.price, payload.entry) ??
+    (pickNumber(payload.entry_low) !== null && pickNumber(payload.entry_high) !== null
+      ? (pickNumber(payload.entry_low)! + pickNumber(payload.entry_high)!) / 2
+      : null) ??
     pickNumber(ai.entry_low) ??
     0;
   const slNum = pickNumber(
@@ -49,17 +66,19 @@ export function buildTelegramMessage(
   const tp1Num = pickNumber(payload.tp1, payload.take_profit, ai.take_profit_1_num);
   const tp2Num = pickNumber(payload.tp2, ai.take_profit_2_num);
 
+  const direction = resolveDirection(payload, ai.bias);
+
   // Render SL/TP rows: prefer numeric with % from entry, fall back to AI text.
   const slLine = slNum !== null
-    ? `<b>${escapeHtml(fmtPrice(slNum))}</b> <i>(${pctFromEntry(slNum, entryNum, ai.bias)})</i>`
+    ? `<b>${escapeHtml(fmtPrice(slNum))}</b> <i>(${pctFromEntry(slNum, entryNum, direction)})</i>`
     : escapeHtml(ai.stop_loss);
 
   const tp1Line = tp1Num !== null
-    ? `<b>${escapeHtml(fmtPrice(tp1Num))}</b> <i>(${pctFromEntry(tp1Num, entryNum, ai.bias)})</i>`
+    ? `<b>${escapeHtml(fmtPrice(tp1Num))}</b> <i>(${pctFromEntry(tp1Num, entryNum, direction)})</i>`
     : escapeHtml(ai.take_profit_1);
 
   const tp2Line = tp2Num !== null
-    ? `<b>${escapeHtml(fmtPrice(tp2Num))}</b> <i>(${pctFromEntry(tp2Num, entryNum, ai.bias)})</i>`
+    ? `<b>${escapeHtml(fmtPrice(tp2Num))}</b> <i>(${pctFromEntry(tp2Num, entryNum, direction)})</i>`
     : escapeHtml(ai.take_profit_2);
 
   // Risk:Reward (using TP1)
@@ -72,15 +91,19 @@ export function buildTelegramMessage(
     }
   }
 
+  const isWait = ai.bias === "WAIT";
+
   const lines: string[] = [
-    "🚨 <b>Crypto AI Signal Alert</b>",
+    isWait
+      ? "⏸️ <b>Crypto AI Signal Alert — WAIT</b>"
+      : "🚨 <b>Crypto AI Signal Alert</b>",
     "",
     `เหรียญ: <b>${escapeHtml(payload.symbol)}</b>`,
     `Timeframe: <b>${escapeHtml(payload.interval)}</b>`,
     `Signal จาก TradingView: <b>${escapeHtml(payload.signal)}</b>`,
     `ราคา: <b>${escapeHtml(fmtPrice(payload.price))}</b>`,
     "",
-    `📊 มุมมอง AI: <b>${escapeHtml(ai.bias)}</b>`,
+    `📊 มุมมอง AI: <b>${escapeHtml(ai.bias)}</b>${isWait ? "  ⚠️ <i>ไม่แนะนำให้เข้า</i>" : ""}`,
     `ความมั่นใจ: <b>${ai.confidence}%</b>`,
     `ความเสี่ยง: <b>${escapeHtml(ai.risk_level)}</b>`,
   ];
