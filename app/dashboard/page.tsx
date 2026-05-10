@@ -142,6 +142,12 @@ export default async function DashboardPage() {
         </div>
         <div className="flex items-center gap-3">
           <Link
+            href="/dashboard/users"
+            className="rounded-lg border border-crypto-border bg-crypto-panel px-4 py-2 text-sm font-semibold text-slate-200 hover:bg-black/30"
+          >
+            👥 Users
+          </Link>
+          <Link
             href="/dashboard/schedule"
             className="rounded-lg border border-crypto-border bg-crypto-panel px-4 py-2 text-sm font-semibold text-slate-200 hover:bg-black/30"
           >

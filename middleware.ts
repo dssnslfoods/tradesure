@@ -8,6 +8,7 @@ const PUBLIC_PATH_PREFIXES = [
   "/login",
   "/api/auth",
   "/api/webhook",      // TradingView webhook (validates secret)
+  "/api/telegram",     // Telegram bot webhook (validates secret_token header)
   "/api/backtest",     // Cloud Scheduler / dashboard (validates secret)
   "/api/schedule",     // Schedule mgmt (validates secret on PATCH)
   "/_next",
