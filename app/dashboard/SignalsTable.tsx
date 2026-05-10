@@ -26,6 +26,113 @@ export interface SignalRow {
   tv_price: number | null;
 }
 
+// Column header definitions: short label, full title, Thai description.
+// Rendered as a tooltip on hover so the table stays compact.
+const COLUMN_INFO: Record<
+  string,
+  { full: string; desc: string }
+> = {
+  Time: {
+    full: "Created time",
+    desc: "เวลาที่ระบบได้รับสัญญาณจาก TradingView (timezone ของ browser)",
+  },
+  Symbol: {
+    full: "Trading symbol",
+    desc: "คู่เหรียญที่ส่งสัญญาณ เช่น BTCUSDT, ETHUSDT",
+  },
+  TF: {
+    full: "Timeframe",
+    desc: "Timeframe ของแท่งเทียนที่สร้างสัญญาณ (15 = 15m, 60 = 1h, 240 = 4h)",
+  },
+  Signal: {
+    full: "TradingView signal",
+    desc: "ทิศทางที่ Pine Script ส่งมา: BUY (long) หรือ SELL (short)",
+  },
+  Price: {
+    full: "Signal price",
+    desc: "ราคาตอนแท่งเทียนปิด ที่ Pine Script เห็นและส่งสัญญาณ",
+  },
+  "AI Bias": {
+    full: "AI bias",
+    desc: "ทิศทางที่ AI วิเคราะห์ — LONG, SHORT, หรือ WAIT (ข้ามไม่ยุ่ง)",
+  },
+  "Conf.": {
+    full: "Confidence (%)",
+    desc: "ระดับความมั่นใจของ AI กับการตัดสินใจ (0–100%) — สูงกว่า 70% = มั่นใจมาก",
+  },
+  Risk: {
+    full: "Risk level",
+    desc: "ระดับความเสี่ยงของ setup นี้ตาม AI: Low / Medium / High",
+  },
+  Entry: {
+    full: "Entry price (mid)",
+    desc: "ราคากลางของ entry zone — คำนวณจาก (entry_low + entry_high) / 2",
+  },
+  SL: {
+    full: "Stop Loss",
+    desc: "ราคา cut loss — ถ้าราคาแตะจุดนี้ก่อนถึง TP จะนับเป็น LOSS_SL",
+  },
+  TP1: {
+    full: "Take Profit 1",
+    desc: "เป้าหมายแรก — ถ้าราคาแตะก่อน SL จะนับเป็น WIN_TP1",
+  },
+  TP2: {
+    full: "Take Profit 2",
+    desc: "เป้าหมายที่สอง (ไกลกว่า TP1) — ถ้าแตะก่อน SL จะนับเป็น WIN_TP2",
+  },
+  "R:R": {
+    full: "Risk : Reward ratio",
+    desc: "อัตราส่วนผลตอบแทนต่อความเสี่ยง (TP1) — สูงกว่า 1.5:1 = setup ที่คุ้มเสี่ยง",
+  },
+  Outcome: {
+    full: "Backtest outcome",
+    desc: "ผลจาก Binance klines: PENDING / OPEN / WIN_TP1 / WIN_TP2 / LOSS_SL / SKIP_WAIT / NO_DATA",
+  },
+  PnL: {
+    full: "Profit / Loss (%)",
+    desc: "กำไรหรือขาดทุนเป็น % จากราคา entry ถึงราคา outcome",
+  },
+  TG: {
+    full: "Telegram sent",
+    desc: "✓ = ส่งข้อความเข้า Telegram สำเร็จ, ✗ = ล้มเหลว",
+  },
+  Actions: {
+    full: "Actions",
+    desc: "ลบ signal นี้ออกถาวร (รวมถึงผล AI analysis)",
+  },
+};
+
+function ColHeader({
+  label,
+  className = "",
+  align = "left",
+}: {
+  label: string;
+  className?: string;
+  align?: "left" | "right";
+}) {
+  const info = COLUMN_INFO[label];
+  return (
+    <th
+      className={`group relative px-4 py-3 ${align === "right" ? "text-right" : ""} ${className}`}
+      title={info ? `${info.full} — ${info.desc}` : label}
+    >
+      <span className="cursor-help border-b border-dotted border-slate-600/60">
+        {label}
+      </span>
+      {info && (
+        <div
+          className="pointer-events-none absolute left-0 top-full z-20 mt-2 hidden w-64 rounded-md border border-slate-700 bg-slate-900/95 p-3 text-left text-[11px] font-normal normal-case tracking-normal text-slate-200 shadow-lg group-hover:block"
+          role="tooltip"
+        >
+          <div className="mb-1 font-semibold text-slate-100">{info.full}</div>
+          <div className="text-slate-400">{info.desc}</div>
+        </div>
+      )}
+    </th>
+  );
+}
+
 function entryMid(r: SignalRow): number | null {
   if (r.entry_low !== null && r.entry_high !== null) {
     return (r.entry_low + r.entry_high) / 2;
@@ -235,23 +342,23 @@ export default function SignalsTable({ rows }: { rows: SignalRow[] }) {
                   aria-label="Select all"
                 />
               </th>
-              <th className="px-4 py-3">Time</th>
-              <th className="px-4 py-3">Symbol</th>
-              <th className="px-4 py-3">TF</th>
-              <th className="px-4 py-3">Signal</th>
-              <th className="px-4 py-3">Price</th>
-              <th className="px-4 py-3">AI Bias</th>
-              <th className="px-4 py-3">Conf.</th>
-              <th className="px-4 py-3">Risk</th>
-              <th className="px-4 py-3">Entry</th>
-              <th className="px-4 py-3 text-rose-300/70">SL</th>
-              <th className="px-4 py-3 text-emerald-300/70">TP1</th>
-              <th className="px-4 py-3 text-emerald-300/70">TP2</th>
-              <th className="px-4 py-3">R:R</th>
-              <th className="px-4 py-3">Outcome</th>
-              <th className="px-4 py-3">PnL</th>
-              <th className="px-4 py-3">TG</th>
-              <th className="px-4 py-3 text-right">Actions</th>
+              <ColHeader label="Time" />
+              <ColHeader label="Symbol" />
+              <ColHeader label="TF" />
+              <ColHeader label="Signal" />
+              <ColHeader label="Price" />
+              <ColHeader label="AI Bias" />
+              <ColHeader label="Conf." />
+              <ColHeader label="Risk" />
+              <ColHeader label="Entry" />
+              <ColHeader label="SL" className="text-rose-300/70" />
+              <ColHeader label="TP1" className="text-emerald-300/70" />
+              <ColHeader label="TP2" className="text-emerald-300/70" />
+              <ColHeader label="R:R" />
+              <ColHeader label="Outcome" />
+              <ColHeader label="PnL" />
+              <ColHeader label="TG" />
+              <ColHeader label="Actions" align="right" />
             </tr>
           </thead>
           <tbody className="divide-y divide-crypto-border">
