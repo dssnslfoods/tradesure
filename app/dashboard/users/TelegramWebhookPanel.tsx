@@ -62,6 +62,41 @@ export default function TelegramWebhookPanel() {
     });
   };
 
+  const onTestBroadcast = () => {
+    setMsg(null);
+    startTransition(async () => {
+      try {
+        const res = await fetch("/api/admin/broadcast-test", {
+          method: "POST",
+          cache: "no-store",
+        });
+        const data = (await res.json()) as {
+          ok: boolean;
+          sent?: number;
+          failed?: number;
+          recipients?: string[];
+          errors?: string[];
+          error?: string;
+        };
+        if (data.ok) {
+          setMsg({
+            tone: "success",
+            text: `✅ ส่ง broadcast test สำเร็จ ${data.sent} chat${
+              data.failed ? ` (failed ${data.failed})` : ""
+            } — ตรวจ Telegram`,
+          });
+        } else {
+          setMsg({
+            tone: "error",
+            text: `❌ ${data.error ?? data.errors?.join(", ") ?? "failed"}`,
+          });
+        }
+      } catch (e) {
+        setMsg({ tone: "error", text: e instanceof Error ? e.message : "failed" });
+      }
+    });
+  };
+
   const isOk = info?.ok && info.url && info.url.endsWith(EXPECTED_PATH);
   const isOtherUrl = info?.ok && info.url && !info.url.endsWith(EXPECTED_PATH);
   const isUnset = info?.ok && !info.url;
@@ -83,6 +118,15 @@ export default function TelegramWebhookPanel() {
             className="rounded border border-crypto-border bg-black/30 px-3 py-1.5 text-xs text-slate-300 hover:bg-black/50 disabled:opacity-40"
           >
             🔄 Refresh
+          </button>
+          <button
+            type="button"
+            onClick={onTestBroadcast}
+            disabled={pending}
+            className="rounded border border-amber-500/40 bg-amber-500/10 px-3 py-1.5 text-xs font-semibold text-amber-300 hover:bg-amber-500/20 disabled:opacity-40"
+            title="ส่ง broadcast test ไปทุก active user"
+          >
+            🧪 Test broadcast
           </button>
           {(isUnset || isOtherUrl) && (
             <button
