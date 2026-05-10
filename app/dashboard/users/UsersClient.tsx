@@ -27,12 +27,15 @@ function contactDisplayName(c: ContactRow) {
 export default function UsersClient({
   users,
   contacts,
+  currentUserId,
 }: {
   users: UserRow[];
   contacts: ContactRow[];
+  currentUserId: string;
 }) {
   const [pendingContactsOnly, setPendingOnly] = useState(true);
   const [registerOpen, setRegisterOpen] = useState<ContactRow | null>(null);
+  const [toast, setToast] = useState<{ tone: "success" | "error"; text: string } | null>(null);
 
   const visibleContacts = pendingContactsOnly
     ? contacts.filter((c) => c.registered_user_id === null)
@@ -69,7 +72,12 @@ export default function UsersClient({
                   </tr>
                 )}
                 {users.map((u) => (
-                  <UserRowItem key={u.id} u={u} />
+                  <UserRowItem
+                    key={u.id}
+                    u={u}
+                    isMe={u.id === currentUserId}
+                    onError={(text) => setToast({ tone: "error", text })}
+                  />
                 ))}
               </tbody>
             </table>
@@ -137,31 +145,71 @@ export default function UsersClient({
         contact={registerOpen}
         onClose={() => setRegisterOpen(null)}
       />
+
+      {toast && (
+        <div className="fixed bottom-6 right-6 z-50 max-w-md">
+          <div
+            className={`flex items-start gap-3 rounded-lg border px-4 py-3 shadow-xl ${
+              toast.tone === "success"
+                ? "border-emerald-500/40 bg-emerald-500/15 text-emerald-200"
+                : "border-rose-500/40 bg-rose-500/15 text-rose-200"
+            }`}
+          >
+            <span className="flex-1 text-sm">{toast.text}</span>
+            <button
+              type="button"
+              onClick={() => setToast(null)}
+              className="text-xs opacity-60 hover:opacity-100"
+            >
+              ✕
+            </button>
+          </div>
+        </div>
+      )}
     </>
   );
 }
 
-function UserRowItem({ u }: { u: UserRow }) {
+function UserRowItem({
+  u,
+  isMe,
+  onError,
+}: {
+  u: UserRow;
+  isMe: boolean;
+  onError: (msg: string) => void;
+}) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
 
   const onToggleActive = () => {
+    if (isMe && u.is_active) {
+      onError("ไม่สามารถ deactivate ตัวเองได้");
+      return;
+    }
     startTransition(async () => {
-      await setUserActive(u.id, !u.is_active);
-      router.refresh();
+      const res = await setUserActive(u.id, !u.is_active);
+      if (!res.ok) onError(res.error ?? "failed");
+      else router.refresh();
     });
   };
   const onToggleAdmin = () => {
     startTransition(async () => {
-      await setUserAdmin(u.id, !u.is_admin);
-      router.refresh();
+      const res = await setUserAdmin(u.id, !u.is_admin);
+      if (!res.ok) onError(res.error ?? "failed");
+      else router.refresh();
     });
   };
 
   return (
-    <tr className="hover:bg-black/20">
+    <tr className={`hover:bg-black/20 ${isMe ? "bg-sky-500/5" : ""}`}>
       <td className="whitespace-nowrap px-4 py-3 font-semibold text-slate-100">
         {u.username}
+        {isMe && (
+          <span className="ml-2 rounded bg-sky-500/20 px-1.5 py-0.5 text-[10px] font-semibold uppercase text-sky-300">
+            you
+          </span>
+        )}
       </td>
       <td className="whitespace-nowrap px-4 py-3 text-slate-300">
         {u.display_name ?? "-"}
@@ -179,8 +227,9 @@ function UserRowItem({ u }: { u: UserRow }) {
         <button
           type="button"
           onClick={onToggleActive}
-          disabled={pending}
-          className={`rounded px-2 py-0.5 text-xs font-semibold disabled:opacity-40 ${
+          disabled={pending || (isMe && u.is_active)}
+          title={isMe && u.is_active ? "ไม่สามารถ deactivate ตัวเองได้" : undefined}
+          className={`rounded px-2 py-0.5 text-xs font-semibold disabled:cursor-not-allowed disabled:opacity-40 ${
             u.is_active
               ? "bg-emerald-500/20 text-emerald-300 hover:bg-emerald-500/30"
               : "bg-slate-500/20 text-slate-400 hover:bg-slate-500/30"

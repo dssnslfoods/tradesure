@@ -98,7 +98,7 @@ export default async function UsersPage() {
         </Link>
       </header>
 
-      <UsersClient users={users} contacts={contacts} />
+      <UsersClient users={users} contacts={contacts} currentUserId={me.id} />
     </main>
   );
 }

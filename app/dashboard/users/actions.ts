@@ -6,14 +6,27 @@ import { getSupabaseAdmin } from "@/lib/supabase/server";
 import { findUserById } from "@/lib/auth/otp";
 import { verifySessionToken, SESSION_COOKIE } from "@/lib/auth/session";
 
-async function requireAdmin(): Promise<{ ok: true } | { ok: false; error: string }> {
+async function requireAdmin(): Promise<
+  { ok: true; userId: string } | { ok: false; error: string }
+> {
   const c = await cookies();
   const session = await verifySessionToken(c.get(SESSION_COOKIE)?.value ?? null);
   if (!session) return { ok: false, error: "ยังไม่ได้ login" };
   const user = await findUserById(session.uid);
   if (!user || !user.is_active) return { ok: false, error: "user inactive" };
   if (!user.is_admin) return { ok: false, error: "ต้องเป็น admin เท่านั้น" };
-  return { ok: true };
+  return { ok: true, userId: user.id };
+}
+
+async function countActiveAdminsExcluding(userId: string): Promise<number> {
+  const supabase = getSupabaseAdmin();
+  const { count } = await supabase
+    .from("auth_users")
+    .select("id", { count: "exact", head: true })
+    .eq("is_active", true)
+    .eq("is_admin", true)
+    .neq("id", userId);
+  return count ?? 0;
 }
 
 export async function createUserFromContact(input: {
@@ -132,6 +145,28 @@ export async function backfillContactLinks(): Promise<{ ok: boolean; linked?: nu
 export async function setUserActive(userId: string, isActive: boolean) {
   const guard = await requireAdmin();
   if (!guard.ok) return guard;
+
+  // Self-protection: cannot deactivate yourself
+  if (userId === guard.userId && !isActive) {
+    return { ok: false, error: "ไม่สามารถ deactivate ตัวเองได้" };
+  }
+
+  // If deactivating an admin, ensure at least one other active admin remains
+  if (!isActive) {
+    const supabase = getSupabaseAdmin();
+    const { data: target } = await supabase
+      .from("auth_users")
+      .select("is_admin")
+      .eq("id", userId)
+      .maybeSingle();
+    if (target?.is_admin) {
+      const others = await countActiveAdminsExcluding(userId);
+      if (others === 0) {
+        return { ok: false, error: "ไม่สามารถ deactivate admin คนสุดท้ายได้" };
+      }
+    }
+  }
+
   const supabase = getSupabaseAdmin();
   const { error } = await supabase
     .from("auth_users")
@@ -145,6 +180,15 @@ export async function setUserActive(userId: string, isActive: boolean) {
 export async function setUserAdmin(userId: string, isAdmin: boolean) {
   const guard = await requireAdmin();
   if (!guard.ok) return guard;
+
+  // Self-protection: cannot demote yourself unless another admin exists
+  if (userId === guard.userId && !isAdmin) {
+    const others = await countActiveAdminsExcluding(userId);
+    if (others === 0) {
+      return { ok: false, error: "ไม่สามารถ demote ตัวเองตอนเป็น admin คนสุดท้าย" };
+    }
+  }
+
   const supabase = getSupabaseAdmin();
   const { error } = await supabase
     .from("auth_users")
