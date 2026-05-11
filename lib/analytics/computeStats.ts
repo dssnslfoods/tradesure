@@ -113,7 +113,13 @@ export interface AllAnalytics {
 const WIN_OUTCOMES = new Set(["WIN_TP1", "WIN_TP2"]);
 const LOSS_OUTCOMES = new Set(["LOSS_SL"]);
 const TERMINAL_OUTCOMES = new Set(["WIN_TP1", "WIN_TP2", "LOSS_SL"]);
-const SKIP_OUTCOMES = new Set(["SKIP_WAIT", "NO_DATA", "ERROR"]);
+const SKIP_OUTCOMES = new Set([
+  "SKIP_WAIT",
+  "SKIP_LOW_CONF",
+  "SKIP_HOUR",
+  "NO_DATA",
+  "ERROR",
+]);
 
 function entryRef(r: AnalyticsRow): number | null {
   if (r.signal_price !== null && Number.isFinite(r.signal_price)) return r.signal_price;
@@ -192,7 +198,12 @@ export function computeAll(rows: AnalyticsRow[]): AllAnalytics {
       case "LOSS_SL": outcomes.LOSS_SL++; break;
       case "OPEN": outcomes.OPEN++; break;
       case "PENDING": outcomes.PENDING++; break;
-      case "SKIP_WAIT": outcomes.SKIP_WAIT++; break;
+      case "SKIP_WAIT":
+      case "SKIP_LOW_CONF":
+      case "SKIP_HOUR":
+        // All three "we did not take this trade" reasons share the donut slice.
+        outcomes.SKIP_WAIT++;
+        break;
       case "NO_DATA":
       case "ERROR":
         outcomes.NO_DATA_OR_ERROR++;

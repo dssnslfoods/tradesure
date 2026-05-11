@@ -37,6 +37,8 @@ export interface AIAnalysisResult {
 export type Outcome =
   | "PENDING"
   | "SKIP_WAIT"
+  | "SKIP_LOW_CONF" // AI confidence below threshold — not sent to Telegram, not backtested
+  | "SKIP_HOUR"     // signal arrived during a blocked low win-rate hour
   | "WIN_TP1"
   | "WIN_TP2"
   | "LOSS_SL"

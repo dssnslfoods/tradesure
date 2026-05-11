@@ -6,16 +6,68 @@ const SYSTEM_PROMPT = `คุณคือผู้ช่วยวิเครา
 - ห้ามรับประกันผลตอบแทน
 - ห้ามฟันธงว่าจะกำไรแน่นอน
 - ระบุความเสี่ยงให้ชัดเจน
-- ใช้ข้อมูลจาก signal, ราคา, timeframe, RSI, EMA หากมี
-- หากข้อมูลไม่เพียงพอ ให้แนะนำ WAIT
+- ใช้ข้อมูลจาก signal, ราคา, timeframe, RSI, EMA, ADX, ATR%, HTF EMA, Volume vs MA หากมี
 - ราคาเข้า / SL / TP ทุกตัวต้องเป็น "ตัวเลข" (numeric) เท่านั้น เพื่อให้ระบบ backtest ได้
 - entry_low ต้องน้อยกว่าหรือเท่ากับ entry_high
 - สำหรับ LONG: stop_loss_num < entry_low < take_profit_1_num < take_profit_2_num
 - สำหรับ SHORT: take_profit_2_num < take_profit_1_num < entry_high < stop_loss_num
 - เขียนกระชับ ชัดเจน อ่านง่ายบน Telegram
-- ตอบกลับเป็น JSON เท่านั้น ไม่ต้องอธิบายเพิ่ม`;
+- ตอบกลับเป็น JSON เท่านั้น ไม่ต้องอธิบายเพิ่ม
+
+=== กฎ Market Regime ===
+ประเมิน regime ก่อนตัดสินใจเสมอ:
+- TRENDING: ADX >= 25 และ trend EMA ชัดเจน → ส่งสัญญาณตามเทรนด์ได้
+- RANGING:  ADX < 20 หรือ ATR% < 0.30 → ตอบ WAIT (ตลาด chop / dead)
+- VOLATILE: ATR% > 1.5 → confidence ไม่เกิน 55 (ความเสี่ยง slippage สูง)
+
+=== กฎ Confidence Calibration (สำคัญมาก) ===
+ห้ามให้คะแนน confidence "เกาะกลุ่ม" 70-80 ทุกครั้ง — ต้องกระจายตาม checklist ที่ผ่าน:
+- 90-100: setup เกือบ perfect (ADX > 30, volume > 1.5× MA, HTF aligned, RSI อยู่ใน sweet spot, R:R ≥ 2)
+- 75-89:  setup ดี ผ่านเงื่อนไขหลักครบ (trend + volume + RSI)
+- 60-74:  setup พอใช้ ผ่านเกณฑ์บางส่วน
+- 50-59:  setup คลุมเครือ → ตอบ WAIT
+- < 50:   signal อ่อน → ตอบ WAIT
+
+=== กฎบังคับให้ตอบ WAIT (override ทุกอย่าง) ===
+- ADX < 20 หรือ ATR% < 0.30 (ตลาด ranging/dead) → WAIT
+- R:R (TP1-entry) / (entry-SL) < 1.0 → WAIT
+- Volume < 0.8× MA (volume bot) → WAIT
+- ข้อมูลไม่เพียงพอ → WAIT
+ถ้า bias = WAIT → เซต entry/SL/TP เป็น null และอธิบายเหตุผลใน reasoning_th
+
+=== กฎ checklist ===
+ต้องตอบ field "checklist" เป็น JSON object ระบุว่าผ่านเงื่อนไขใดบ้าง:
+{ "trend_aligned": bool, "volume_confirms": bool, "rsi_in_zone": bool, "rr_acceptable": bool, "regime": "TRENDING"|"RANGING"|"VOLATILE" }
+ต้องผ่านอย่างน้อย 3/4 ถึงให้ LONG/SHORT ได้ (regime = RANGING → WAIT เสมอ)`;
 
 function buildUserPrompt(p: TradingViewPayload): string {
+  // Payload from Pine v2 includes adx, atr, atr_pct, htf_ema, volume, volume_ma — wire them in
+  const pp = p as TradingViewPayload & {
+    adx?: number | string;
+    atr?: number | string;
+    atr_pct?: number | string;
+    htf_ema?: number | string;
+    volume?: number | string;
+    volume_ma?: number | string;
+    fast_ema?: number | string;
+    slow_ema?: number | string;
+    trend_ema?: number | string;
+  };
+  const vol = Number(pp.volume);
+  const volMa = Number(pp.volume_ma);
+  const volMult =
+    Number.isFinite(vol) && Number.isFinite(volMa) && volMa > 0
+      ? (vol / volMa).toFixed(2)
+      : "-";
+  const price = Number(p.price);
+  const htf = Number(pp.htf_ema);
+  const htfBias =
+    Number.isFinite(price) && Number.isFinite(htf) && htf > 0
+      ? price > htf
+        ? "above HTF (bullish bias)"
+        : "below HTF (bearish bias)"
+      : "-";
+
   return `วิเคราะห์สัญญาณ Crypto จาก TradingView ต่อไปนี้:
 
 เหรียญ (symbol): ${p.symbol}
@@ -25,13 +77,25 @@ Signal: ${p.signal}
 ราคา (price): ${p.price}
 Strategy: ${p.strategy ?? "-"}
 RSI: ${p.rsi ?? "-"}
-EMA Fast: ${p.ema_fast ?? "-"}
-EMA Slow: ${p.ema_slow ?? "-"}
+ADX: ${pp.adx ?? "-"}  (>25 = trending, <20 = ranging, >30 = strong trend)
+ATR%: ${pp.atr_pct ?? "-"}  (<0.30 = dead market, >1.5 = volatile)
+EMA Fast: ${pp.fast_ema ?? p.ema_fast ?? "-"}
+EMA Slow: ${pp.slow_ema ?? p.ema_slow ?? "-"}
+Trend EMA: ${pp.trend_ema ?? "-"}
+HTF EMA50: ${pp.htf_ema ?? "-"} (${htfBias})
+Volume vs MA: ${volMult}× (>1.3× = good, <0.8× = weak)
 เวลา: ${p.time}
 หมายเหตุ: ${p.note ?? "-"}
 
 ตอบกลับเป็น JSON ตามรูปแบบนี้เท่านั้น:
 {
+  "checklist": {
+    "trend_aligned": true | false,
+    "volume_confirms": true | false,
+    "rsi_in_zone": true | false,
+    "rr_acceptable": true | false,
+    "regime": "TRENDING" | "RANGING" | "VOLATILE"
+  },
   "bias": "LONG" | "SHORT" | "WAIT",
   "confidence": 0-100,
   "entry_zone": "ข้อความบรรยาย เช่น 65000 - 65300",
@@ -45,10 +109,10 @@ EMA Slow: ${p.ema_slow ?? "-"}
   "take_profit_2_num": ตัวเลข TP2,
   "risk_level": "Low" | "Medium" | "High",
   "summary_th": "สรุปสั้น ๆ 1-2 ประโยค",
-  "reasoning_th": "เหตุผลประกอบสั้น ๆ"
+  "reasoning_th": "เหตุผลประกอบสั้น ๆ — ระบุด้วยว่า regime อะไร และผ่าน checklist กี่ข้อ"
 }
 
-ถ้า bias = "WAIT" ให้ตั้ง entry_low, entry_high, stop_loss_num, take_profit_1_num, take_profit_2_num เป็น null ได้`;
+ย้ำ: ถ้า regime = RANGING หรือ checklist ผ่าน < 3/4 หรือ R:R < 1.0 → bias = "WAIT" และ set ราคาทุกตัวเป็น null`;
 }
 
 function coerceBias(v: unknown): AIBias {
@@ -86,7 +150,8 @@ export async function analyzeCryptoSignal(
 
   const completion = await client.chat.completions.create({
     model: process.env.OPENAI_MODEL || "gpt-4o-mini",
-    temperature: 0.2,
+    // Lower temperature → more consistent confidence calibration across signals.
+    temperature: 0,
     response_format: { type: "json_object" },
     messages: [
       { role: "system", content: SYSTEM_PROMPT },

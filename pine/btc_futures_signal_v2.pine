@@ -33,6 +33,11 @@ htfTimeframe   = input.string("240", "Higher timeframe", options=["120","240","3
 htfEmaLen      = input.int(50,   "HTF EMA length", minval=1, group=grpFilter)
 cooldownBars   = input.int(3,    "Cooldown bars after a signal", minval=0, group=grpFilter)
 
+// Session / time-of-day filter — block hours with poor historical win rate
+// (Asia midday & US/London open whipsaw). Hours are evaluated in Asia/Bangkok TZ.
+useTimeFilter  = input.bool(true,  "Block low win-rate hours (Asia/Bangkok)", group=grpFilter)
+blockHours     = input.string("13,14,16,17,20", "Blocked hours (comma list, 0-23 BKK)", group=grpFilter)
+
 grpRun    = "Execution"
 useConfirmedBar = input.bool(true,  "Alert only after candle close", group=grpRun)
 enableLong      = input.bool(true,  "Enable LONG (BUY) alerts",  group=grpRun)
@@ -70,6 +75,11 @@ htfDown     = not useHtfFilter or close < htfEma
 
 barReady = useConfirmedBar ? barstate.isconfirmed : true
 
+// Time-of-day gate — current bar's hour in Asia/Bangkok TZ vs blocked list
+currentHourBkk = hour(time, "Asia/Bangkok")
+isBlockedHour = str.contains("," + blockHours + ",", "," + str.tostring(currentHourBkk) + ",")
+timeOk = not useTimeFilter or not isBlockedHour
+
 // Cooldown
 var int lastSignalBar = na
 canSignal = na(lastSignalBar) or (bar_index - lastSignalBar) >= cooldownBars
@@ -78,8 +88,8 @@ canSignal = na(lastSignalBar) or (bar_index - lastSignalBar) >= cooldownBars
 rawLong  = ta.crossover(fastEma, slowEma)  and close > trendEma and rsi >= rsiLongMin  and rsi <= rsiLongMax
 rawShort = ta.crossunder(fastEma, slowEma) and close < trendEma and rsi <= rsiShortMax and rsi >= rsiShortMin
 
-longSignal  = enableLong  and barReady and rawLong  and trendUp   and trendStrong and volOk and atrOk and htfUp   and canSignal
-shortSignal = enableShort and barReady and rawShort and trendDown and trendStrong and volOk and atrOk and htfDown and canSignal
+longSignal  = enableLong  and barReady and rawLong  and trendUp   and trendStrong and volOk and atrOk and htfUp   and canSignal and timeOk
+shortSignal = enableShort and barReady and rawShort and trendDown and trendStrong and volOk and atrOk and htfDown and canSignal and timeOk
 
 if longSignal or shortSignal
     lastSignalBar := bar_index

@@ -33,12 +33,18 @@ export interface SignalRow {
 
 type FilterKey = "all" | "open" | "wins" | "losses" | "skip";
 
+// All three SKIP_* outcomes mean "we didn't take this trade" — group under one filter.
+const isSkipped = (r: SignalRow) =>
+  r.outcome === "SKIP_WAIT" ||
+  r.outcome === "SKIP_LOW_CONF" ||
+  r.outcome === "SKIP_HOUR";
+
 const FILTERS: { key: FilterKey; label: string; match: (r: SignalRow) => boolean }[] = [
   { key: "all", label: "All", match: () => true },
   { key: "open", label: "Open", match: (r) => r.outcome === "OPEN" || r.outcome === "PENDING" },
   { key: "wins", label: "Wins", match: (r) => r.outcome === "WIN_TP1" || r.outcome === "WIN_TP2" },
   { key: "losses", label: "Losses", match: (r) => r.outcome === "LOSS_SL" },
-  { key: "skip", label: "No Trade", match: (r) => r.outcome === "SKIP_WAIT" },
+  { key: "skip", label: "No Trade", match: isSkipped },
 ];
 
 export default function SignalsTable({
@@ -75,7 +81,7 @@ export default function SignalsTable({
     open: rows.filter((r) => r.outcome === "OPEN" || r.outcome === "PENDING").length,
     wins: rows.filter((r) => r.outcome === "WIN_TP1" || r.outcome === "WIN_TP2").length,
     losses: rows.filter((r) => r.outcome === "LOSS_SL").length,
-    skip: rows.filter((r) => r.outcome === "SKIP_WAIT").length,
+    skip: rows.filter(isSkipped).length,
   };
 
   // Mark "new" signals as those created in last hour

@@ -83,6 +83,8 @@ function computeStats(rows: Row[]): Stats {
         s.pending++;
         break;
       case "SKIP_WAIT":
+      case "SKIP_LOW_CONF":
+      case "SKIP_HOUR":
       case "NO_DATA":
       case "ERROR":
         s.skipped++;

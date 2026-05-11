@@ -11,6 +11,37 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
+// ── Quality gates applied *after* AI returns ───────────────────────────────
+// Tunable via env so we can adjust without code deploy.
+const MIN_CONFIDENCE = Number(process.env.MIN_CONFIDENCE ?? 70);
+// Bangkok-local hours where historical win rate was < 40% — block these.
+// Set BLOCKED_HOURS="" to disable. Default mirrors Pine v2 default list.
+const BLOCKED_HOURS = (process.env.BLOCKED_HOURS ?? "13,14,16,17,20")
+  .split(",")
+  .map((s) => Number(s.trim()))
+  .filter((n) => Number.isFinite(n) && n >= 0 && n <= 23);
+
+/**
+ * Returns the hour-of-day in Asia/Bangkok for the signal's bar time. The
+ * payload `time` field from Pine is a unix-ms string (UTC); we convert to
+ * BKK so the filter lines up with our analytics heatmap.
+ */
+function bangkokHour(payload: TradingViewPayload): number | null {
+  const raw = payload.time;
+  if (raw === undefined || raw === null || raw === "") return null;
+  const ms = typeof raw === "number" ? raw : Number(raw);
+  const d = Number.isFinite(ms) ? new Date(ms) : new Date(String(raw));
+  if (Number.isNaN(d.getTime())) return null;
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: "Asia/Bangkok",
+    hour: "2-digit",
+    hour12: false,
+  }).formatToParts(d);
+  const h = parts.find((p) => p.type === "hour")?.value;
+  const n = Number(h);
+  return Number.isFinite(n) ? n : null;
+}
+
 // Internal endpoint: invoked by /api/webhook/tradingview after it has
 // already persisted the signal row. Runs AI + Telegram + analysis insert in
 // the background so the public webhook can respond to TradingView in <3s.
@@ -58,6 +89,30 @@ export async function POST(req: NextRequest) {
     );
   }
 
+  // ── Post-filter: decide the outcome bucket BEFORE inserting so the row is
+  //    correctly tagged and downstream backtest/analytics skip it cleanly.
+  let outcome: "SKIP_WAIT" | "SKIP_LOW_CONF" | "SKIP_HOUR" | "PENDING";
+  let filterReason: string | null = null;
+
+  const bkkHour = bangkokHour(payload);
+
+  if (aiResult.bias === "WAIT") {
+    outcome = "SKIP_WAIT";
+  } else if (bkkHour !== null && BLOCKED_HOURS.includes(bkkHour)) {
+    outcome = "SKIP_HOUR";
+    filterReason = `Blocked hour ${String(bkkHour).padStart(2, "0")}:00 (BKK) — historical win rate < 40%`;
+  } else if (aiResult.confidence < MIN_CONFIDENCE) {
+    outcome = "SKIP_LOW_CONF";
+    filterReason = `AI confidence ${aiResult.confidence}% < threshold ${MIN_CONFIDENCE}%`;
+  } else {
+    outcome = "PENDING";
+  }
+
+  // Mutate reasoning so the dashboard surfaces *why* a signal was filtered.
+  const reasoningWithFilter = filterReason
+    ? `[FILTERED: ${filterReason}] ${aiResult.reasoning_th}`
+    : aiResult.reasoning_th;
+
   const { data: analysisRow, error: analysisErr } = await supabase
     .from("ai_signal_analysis")
     .insert({
@@ -77,10 +132,10 @@ export async function POST(req: NextRequest) {
       take_profit_2_num: aiResult.take_profit_2_num,
       risk_level: aiResult.risk_level,
       summary_th: aiResult.summary_th,
-      reasoning_th: aiResult.reasoning_th,
+      reasoning_th: reasoningWithFilter,
       telegram_sent: false,
       ai_raw_response: aiRaw,
-      outcome: aiResult.bias === "WAIT" ? "SKIP_WAIT" : "PENDING",
+      outcome,
     })
     .select("id")
     .single();
@@ -97,6 +152,19 @@ export async function POST(req: NextRequest) {
   }
 
   const analysisId = analysisRow.id as string;
+
+  // Skip Telegram for any non-actionable outcome.
+  if (outcome !== "PENDING") {
+    return NextResponse.json({
+      ok: true,
+      signal_id: signalId,
+      analysis_id: analysisId,
+      telegram_sent: false,
+      filtered: true,
+      outcome,
+      filter_reason: filterReason,
+    });
+  }
 
   const message = buildTelegramMessage(payload, aiResult);
   const tg = await broadcastTelegramMessage(message);
