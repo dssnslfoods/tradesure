@@ -145,109 +145,94 @@ export async function evaluateSignal(
   let mae = 0; // max adverse excursion (%)
   let lastBar: Kline | null = null;
 
+  // TP1-then-TP2 chain (Option A):
+  //   When TP1 is hit first, the trade is NOT closed — we mark "tp1Reached"
+  //   and continue scanning. From that point on:
+  //     • Subsequent bar high (LONG) or low (SHORT) reaches TP2 → upgrade WIN_TP2
+  //     • Subsequent bar touches SL → stay as WIN_TP1 (partial profit kept;
+  //       assumes runner stopped at break-even, but we still credit TP1)
+  //     • Window exhausted → stay as WIN_TP1 (no further runner profit)
+  //   First-touch ordering inside any single bar:
+  //     SL > TP2 > TP1 (most pessimistic for the SL branch).
+  let tp1Reached: { bar: number; closeTime: number } | null = null;
+
+  const buildOutcome = (
+    outcome: Outcome,
+    price: number,
+    barIdx: number,
+    closeTime: number,
+    note: string | null = null
+  ): EvaluationResult => ({
+    outcome,
+    outcome_price: price,
+    outcome_at: new Date(closeTime).toISOString(),
+    pnl_pct: pnl(s.bias, entry, price),
+    max_favorable_excursion_pct: mfe,
+    max_adverse_excursion_pct: mae,
+    bars_evaluated: barIdx + 1,
+    evaluator_note: note,
+  });
+
   for (let i = 0; i < klines.length; i++) {
     const k = klines[i];
     lastBar = k;
 
-    if (s.bias === "LONG") {
-      const favorable = pnl("LONG", entry, k.high);
-      const adverse = pnl("LONG", entry, k.low);
-      if (favorable > mfe) mfe = favorable;
-      if (adverse < mae) mae = adverse;
+    const isLong = s.bias === "LONG";
+    const favorable = pnl(s.bias, entry, isLong ? k.high : k.low);
+    const adverse = pnl(s.bias, entry, isLong ? k.low : k.high);
+    if (favorable > mfe) mfe = favorable;
+    if (adverse < mae) mae = adverse;
 
-      // First-touch model. If both SL and TP touched in same bar, assume SL
-      // hit first (conservative pessimistic).
-      const slHit = k.low <= sl;
-      const tp2Hit = k.high >= tp2;
-      const tp1Hit = k.high >= tp1;
+    const slHit = isLong ? k.low <= sl : k.high >= sl;
+    const tp2Hit = isLong ? k.high >= tp2 : k.low <= tp2;
+    const tp1Hit = isLong ? k.high >= tp1 : k.low <= tp1;
 
-      if (slHit) {
-        return {
-          outcome: "LOSS_SL",
-          outcome_price: sl,
-          outcome_at: new Date(k.closeTime).toISOString(),
-          pnl_pct: pnl("LONG", entry, sl),
-          max_favorable_excursion_pct: mfe,
-          max_adverse_excursion_pct: mae,
-          bars_evaluated: i + 1,
-          evaluator_note: null,
-        };
-      }
-      if (tp2Hit) {
-        return {
-          outcome: "WIN_TP2",
-          outcome_price: tp2,
-          outcome_at: new Date(k.closeTime).toISOString(),
-          pnl_pct: pnl("LONG", entry, tp2),
-          max_favorable_excursion_pct: mfe,
-          max_adverse_excursion_pct: mae,
-          bars_evaluated: i + 1,
-          evaluator_note: null,
-        };
-      }
+    if (!tp1Reached) {
+      // Phase 1: before any TP1 hit. Standard first-touch (pessimistic):
+      // SL → TP2 → TP1.
+      if (slHit) return buildOutcome("LOSS_SL", sl, i, k.closeTime);
+      if (tp2Hit) return buildOutcome("WIN_TP2", tp2, i, k.closeTime);
       if (tp1Hit) {
-        return {
-          outcome: "WIN_TP1",
-          outcome_price: tp1,
-          outcome_at: new Date(k.closeTime).toISOString(),
-          pnl_pct: pnl("LONG", entry, tp1),
-          max_favorable_excursion_pct: mfe,
-          max_adverse_excursion_pct: mae,
-          bars_evaluated: i + 1,
-          evaluator_note: null,
-        };
+        tp1Reached = { bar: i, closeTime: k.closeTime };
+        // Same bar may also have reached TP2 already (caught above by tp2Hit
+        // branch), so if we got here it means TP2 was NOT reached in this bar.
+        // Continue scanning subsequent bars for a potential TP2 upgrade.
+        continue;
       }
     } else {
-      // SHORT — flipped
-      const favorable = pnl("SHORT", entry, k.low);
-      const adverse = pnl("SHORT", entry, k.high);
-      if (favorable > mfe) mfe = favorable;
-      if (adverse < mae) mae = adverse;
-
-      const slHit = k.high >= sl;
-      const tp2Hit = k.low <= tp2;
-      const tp1Hit = k.low <= tp1;
-
-      if (slHit) {
-        return {
-          outcome: "LOSS_SL",
-          outcome_price: sl,
-          outcome_at: new Date(k.closeTime).toISOString(),
-          pnl_pct: pnl("SHORT", entry, sl),
-          max_favorable_excursion_pct: mfe,
-          max_adverse_excursion_pct: mae,
-          bars_evaluated: i + 1,
-          evaluator_note: null,
-        };
-      }
+      // Phase 2: after TP1 hit. Looking for TP2 upgrade or SL invalidation.
       if (tp2Hit) {
-        return {
-          outcome: "WIN_TP2",
-          outcome_price: tp2,
-          outcome_at: new Date(k.closeTime).toISOString(),
-          pnl_pct: pnl("SHORT", entry, tp2),
-          max_favorable_excursion_pct: mfe,
-          max_adverse_excursion_pct: mae,
-          bars_evaluated: i + 1,
-          evaluator_note: null,
-        };
+        return buildOutcome(
+          "WIN_TP2",
+          tp2,
+          i,
+          k.closeTime,
+          `Upgraded from TP1 (bar ${tp1Reached.bar + 1}) → TP2 (bar ${i + 1})`
+        );
       }
-      if (tp1Hit) {
-        return {
-          outcome: "WIN_TP1",
-          outcome_price: tp1,
-          outcome_at: new Date(k.closeTime).toISOString(),
-          pnl_pct: pnl("SHORT", entry, tp1),
-          max_favorable_excursion_pct: mfe,
-          max_adverse_excursion_pct: mae,
-          bars_evaluated: i + 1,
-          evaluator_note: null,
-        };
+      if (slHit) {
+        // SL after TP1 — keep TP1 win (partial profit assumed).
+        return buildOutcome(
+          "WIN_TP1",
+          tp1,
+          tp1Reached.bar,
+          tp1Reached.closeTime,
+          `TP1 hit at bar ${tp1Reached.bar + 1}; runner stopped at bar ${i + 1}`
+        );
       }
     }
   }
 
-  // Window exhausted, no level hit yet
+  // Window exhausted
+  if (tp1Reached) {
+    return buildOutcome(
+      "WIN_TP1",
+      tp1,
+      tp1Reached.bar,
+      tp1Reached.closeTime,
+      `TP1 hit at bar ${tp1Reached.bar + 1}; ran ${klines.length - tp1Reached.bar - 1} bars without reaching TP2`
+    );
+  }
   return {
     outcome: "OPEN",
     outcome_price: lastBar ? lastBar.close : null,
