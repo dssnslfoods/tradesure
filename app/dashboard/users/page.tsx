@@ -82,7 +82,7 @@ export default async function UsersPage() {
     <>
       <header className="mb-7">
         <div className="eyebrow">Admin · Identity & access</div>
-        <h1 className="mt-1 text-[32px] font-bold tracking-tightest text-ink-primary">
+        <h1 className="mt-1 text-[24px] font-bold tracking-tightest text-ink-primary sm:text-[32px]">
           Users &amp; Telegram contacts
         </h1>
         <p className="mt-1 text-[13px] text-ink-secondary">

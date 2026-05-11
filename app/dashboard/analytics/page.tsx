@@ -89,7 +89,7 @@ export default async function AnalyticsPage() {
     <>
       <header className="mb-7">
         <div className="eyebrow">Performance · {rows.length} signals</div>
-        <h1 className="mt-1 text-[32px] font-bold tracking-tightest text-ink-primary">
+        <h1 className="mt-1 text-[24px] font-bold tracking-tightest text-ink-primary sm:text-[32px]">
           Analytics
         </h1>
         <p className="mt-1 text-[13px] text-ink-secondary">

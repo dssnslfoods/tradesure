@@ -126,7 +126,7 @@ export default async function DashboardPage() {
       <div className="mb-7 flex flex-wrap items-end justify-between gap-4">
         <div>
           <div className="eyebrow">Live signals · Last 24h</div>
-          <h1 className="mt-1 text-[32px] font-bold tracking-tightest text-ink-primary">
+          <h1 className="mt-1 text-[24px] font-bold tracking-tightest text-ink-primary sm:text-[32px]">
             Signal Dashboard
           </h1>
           <p className="mt-1 text-[13px] text-ink-secondary">
@@ -134,7 +134,7 @@ export default async function DashboardPage() {
           </p>
         </div>
         {isAdmin && (
-          <div className="flex items-center gap-2">
+          <div className="flex w-full items-center gap-2 sm:w-auto">
             <BacktestButton />
           </div>
         )}

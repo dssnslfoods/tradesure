@@ -124,7 +124,7 @@ export default async function TrendingPage({
       <header className="mb-7 flex flex-wrap items-end justify-between gap-4">
         <div>
           <div className="eyebrow">Live · Binance USDT pairs</div>
-          <h1 className="mt-1 text-[32px] font-bold tracking-tightest text-ink-primary">
+          <h1 className="mt-1 text-[24px] font-bold tracking-tightest text-ink-primary sm:text-[32px]">
             Trending Crypto
           </h1>
           <p className="mt-1 text-[13px] text-ink-secondary">

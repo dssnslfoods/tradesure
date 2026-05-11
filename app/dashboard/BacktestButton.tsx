@@ -31,12 +31,20 @@ export default function BacktestButton() {
   };
 
   return (
-    <div className="flex flex-col items-end gap-2">
-      <div className="flex gap-2">
-        <button onClick={() => run("new")} disabled={pending} className="btn btn-primary">
+    <div className="flex w-full flex-col items-stretch gap-2 sm:w-auto sm:items-end">
+      <div className="flex flex-wrap gap-2">
+        <button
+          onClick={() => run("new")}
+          disabled={pending}
+          className="btn btn-primary flex-1 justify-center sm:flex-none"
+        >
           {pending ? "Refreshing…" : "Run backtest"}
         </button>
-        <button onClick={() => run("all")} disabled={pending} className="btn btn-secondary">
+        <button
+          onClick={() => run("all")}
+          disabled={pending}
+          className="btn btn-secondary flex-1 justify-center sm:flex-none"
+        >
           Re-evaluate all
         </button>
       </div>

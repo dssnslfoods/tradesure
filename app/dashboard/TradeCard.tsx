@@ -206,8 +206,8 @@ export default function TradeCard({
       </div>
 
       {/* Footer */}
-      <div className="mt-4 flex items-center justify-between border-t border-white/5 pt-3">
-        <div className="flex items-center gap-2 text-[11px] text-ink-muted">
+      <div className="mt-4 flex flex-wrap items-center justify-between gap-2 border-t border-white/5 pt-3">
+        <div className="flex flex-wrap items-center gap-2 text-[11px] text-ink-muted">
           {row.telegram_sent ? (
             <>
               <Icon name="telegram" size={12} className="text-sig-info" />

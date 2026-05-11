@@ -519,7 +519,7 @@ export default function HelpClient() {
     <>
       <header className="mb-7">
         <div className="eyebrow">Documentation</div>
-        <h1 className="mt-1 text-[32px] font-bold tracking-tightest text-ink-primary">
+        <h1 className="mt-1 text-[24px] font-bold tracking-tightest text-ink-primary sm:text-[32px]">
           คู่มือการใช้งาน
         </h1>
         <p className="mt-1 text-[13px] text-ink-secondary">

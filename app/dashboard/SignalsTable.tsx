@@ -96,7 +96,7 @@ export default function SignalsTable({
   return (
     <div>
       {/* Filter toolbar */}
-      <div className="mb-5 flex flex-wrap items-center gap-2">
+      <div className="mb-5 flex flex-wrap items-center gap-2 overflow-x-auto pb-1">
         {FILTERS.map((f) => (
           <button
             key={f.key}
@@ -127,7 +127,7 @@ export default function SignalsTable({
             type="button"
             onClick={onBulkDelete}
             disabled={pending}
-            className="ml-auto chip !bg-sig-sell/10 !text-sig-sell !border-sig-sell/30 hover:!bg-sig-sell/20"
+            className="chip !bg-sig-sell/10 !text-sig-sell !border-sig-sell/30 hover:!bg-sig-sell/20 sm:ml-auto"
           >
             <Icon name="trash" size={12} />
             Delete selected ({selected.size})
