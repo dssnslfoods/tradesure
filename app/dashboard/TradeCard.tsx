@@ -110,10 +110,45 @@ export default function TradeCard({
     ? "var(--accent)"
     : "var(--info)";
 
+  // Watermark based on outcome — semi-transparent diagonal label across the card
+  const watermark =
+    row.outcome === "WIN_TP2"
+      ? { text: "ALL WIN", color: "var(--buy)" }
+      : row.outcome === "WIN_TP1"
+      ? { text: "WIN TP1", color: "var(--buy)" }
+      : row.outcome === "LOSS_SL"
+      ? { text: "LOSE", color: "var(--sell)" }
+      : null;
+
   return (
     <div
       className={`card relative overflow-hidden p-[18px] ${isNew ? "is-new shimmer" : ""}`}
     >
+      {/* Outcome watermark */}
+      {watermark && (
+        <div
+          aria-hidden="true"
+          className="pointer-events-none absolute inset-0 z-[1] flex items-center justify-center overflow-hidden"
+        >
+          <span
+            className="select-none whitespace-nowrap font-black tracking-[0.2em]"
+            style={{
+              fontSize: "clamp(48px, 14vw, 88px)",
+              color: watermark.color,
+              opacity: 0.09,
+              transform: "rotate(-14deg)",
+              textShadow: `0 0 60px ${watermark.color}`,
+              WebkitTextStroke: `1px ${watermark.color}`,
+            }}
+          >
+            {watermark.text}
+          </span>
+        </div>
+      )}
+
+      {/* Content wrapper above watermark */}
+      <div className="relative z-[2]">
+
       {/* Header */}
       <div className="flex items-start justify-between gap-3">
         <div className="flex items-center gap-3">
@@ -262,6 +297,7 @@ export default function TradeCard({
           </div>
         )}
       </div>
+      </div>{/* /content wrapper above watermark */}
     </div>
   );
 }
