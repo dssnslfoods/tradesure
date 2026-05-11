@@ -1,11 +1,13 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useEffect, useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { deleteSignals } from "./actions";
 import EditLevelsModal from "./EditLevelsModal";
 import TradeCard from "./TradeCard";
 import Icon from "@/components/ui/Icon";
+
+const PAGE_SIZE = 10;
 
 export interface SignalRow {
   id: string;
@@ -51,9 +53,22 @@ export default function SignalsTable({
   const [editing, setEditing] = useState<SignalRow | null>(null);
   const [filter, setFilter] = useState<FilterKey>("all");
   const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [page, setPage] = useState(0);
 
   const filterMatch = FILTERS.find((f) => f.key === filter)!;
-  const visible = rows.filter((r) => filterMatch.match(r));
+  const visible = useMemo(() => rows.filter((r) => filterMatch.match(r)), [rows, filterMatch]);
+
+  // Pagination
+  const totalPages = Math.max(1, Math.ceil(visible.length / PAGE_SIZE));
+  const currentPage = Math.min(page, totalPages - 1);
+  const pageStart = currentPage * PAGE_SIZE;
+  const pageEnd = pageStart + PAGE_SIZE;
+  const pageItems = visible.slice(pageStart, pageEnd);
+
+  // Reset to first page when filter changes
+  useEffect(() => {
+    setPage(0);
+  }, [filter]);
 
   const counts: Record<FilterKey, number> = {
     all: rows.length,
@@ -101,7 +116,11 @@ export default function SignalsTable({
         ))}
         <span className="mx-1 h-5 w-px bg-white/5" />
         <span className="text-[11px] text-ink-muted">
-          แสดง {visible.length} จาก {rows.length} รายการ
+          แสดง{" "}
+          <span className="font-mono text-ink-primary">
+            {visible.length === 0 ? 0 : pageStart + 1}-{Math.min(pageEnd, visible.length)}
+          </span>{" "}
+          จาก {visible.length} รายการ
         </span>
         {isAdmin && selected.size > 0 && (
           <button
@@ -128,35 +147,52 @@ export default function SignalsTable({
           </div>
         </div>
       ) : (
-        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-          {visible.map((r) => {
-            const isNew = new Date(r.created_at).getTime() > oneHourAgo;
-            return (
-              <div key={r.id} className="relative">
-                {isAdmin && (
-                  <input
-                    type="checkbox"
-                    checked={selected.has(r.signal_id)}
-                    onChange={(e) => {
-                      const next = new Set(selected);
-                      if (e.target.checked) next.add(r.signal_id);
-                      else next.delete(r.signal_id);
-                      setSelected(next);
-                    }}
-                    className="absolute right-3 top-3 z-10 h-4 w-4 cursor-pointer accent-brand"
-                    aria-label={`Select ${r.symbol}`}
+        <>
+          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+            {pageItems.map((r) => {
+              const isNew = new Date(r.created_at).getTime() > oneHourAgo;
+              return (
+                <div key={r.id} className="relative">
+                  {isAdmin && (
+                    <input
+                      type="checkbox"
+                      checked={selected.has(r.signal_id)}
+                      onChange={(e) => {
+                        const next = new Set(selected);
+                        if (e.target.checked) next.add(r.signal_id);
+                        else next.delete(r.signal_id);
+                        setSelected(next);
+                      }}
+                      className="absolute right-3 top-3 z-10 h-4 w-4 cursor-pointer accent-brand"
+                      aria-label={`Select ${r.symbol}`}
+                    />
+                  )}
+                  <TradeCard
+                    row={r}
+                    isAdmin={isAdmin}
+                    onEdit={() => setEditing(r)}
+                    isNew={isNew}
                   />
-                )}
-                <TradeCard
-                  row={r}
-                  isAdmin={isAdmin}
-                  onEdit={() => setEditing(r)}
-                  isNew={isNew}
-                />
-              </div>
-            );
-          })}
-        </div>
+                </div>
+              );
+            })}
+          </div>
+
+          {/* Pagination controls */}
+          {totalPages > 1 && (
+            <Pagination
+              page={currentPage}
+              totalPages={totalPages}
+              onPage={(p) => {
+                setPage(p);
+                // Scroll back to top of list smoothly
+                if (typeof window !== "undefined") {
+                  window.scrollTo({ top: window.scrollY - 200, behavior: "smooth" });
+                }
+              }}
+            />
+          )}
+        </>
       )}
 
       <EditLevelsModal
@@ -178,5 +214,95 @@ export default function SignalsTable({
         }
       />
     </div>
+  );
+}
+
+function Pagination({
+  page,
+  totalPages,
+  onPage,
+}: {
+  page: number;
+  totalPages: number;
+  onPage: (p: number) => void;
+}) {
+  // Build page-number list with ellipses for compactness:
+  //   [1] 2 3 … (last) when page is near start
+  //   1 … (page-1) [page] (page+1) … last when in middle
+  //   1 … (last-2) (last-1) [last] when near end
+  const range: (number | "ellipsis")[] = [];
+  const push = (v: number | "ellipsis") => {
+    if (typeof v === "number" && (v < 0 || v >= totalPages)) return;
+    if (range[range.length - 1] === v && v === "ellipsis") return;
+    range.push(v);
+  };
+
+  if (totalPages <= 7) {
+    for (let i = 0; i < totalPages; i++) push(i);
+  } else {
+    push(0);
+    if (page > 2) push("ellipsis");
+    for (let i = page - 1; i <= page + 1; i++) {
+      if (i > 0 && i < totalPages - 1) push(i);
+    }
+    if (page < totalPages - 3) push("ellipsis");
+    push(totalPages - 1);
+  }
+
+  return (
+    <nav
+      className="mt-5 flex flex-wrap items-center justify-center gap-1"
+      aria-label="Pagination"
+    >
+      <button
+        type="button"
+        onClick={() => onPage(page - 1)}
+        disabled={page === 0}
+        className="flex h-8 items-center gap-1 rounded-chip border border-white/5 bg-surface-1 px-3 text-[12px] text-ink-secondary transition hover:bg-surface-2 hover:text-ink-primary disabled:cursor-not-allowed disabled:opacity-30"
+        aria-label="Previous page"
+      >
+        <Icon name="chevron-right" size={14} className="rotate-180" />
+        Prev
+      </button>
+
+      <div className="mx-1 flex items-center gap-1">
+        {range.map((v, i) =>
+          v === "ellipsis" ? (
+            <span
+              key={`e${i}`}
+              className="px-2 font-mono text-[12px] text-ink-faint"
+              aria-hidden="true"
+            >
+              …
+            </span>
+          ) : (
+            <button
+              key={v}
+              type="button"
+              onClick={() => onPage(v)}
+              aria-current={v === page ? "page" : undefined}
+              className={`flex h-8 min-w-[32px] items-center justify-center rounded-chip px-2 font-mono text-[12px] transition ${
+                v === page
+                  ? "bg-brand/15 text-brand shadow-glow ring-1 ring-brand/30"
+                  : "border border-white/5 bg-surface-1 text-ink-secondary hover:bg-surface-2 hover:text-ink-primary"
+              }`}
+            >
+              {v + 1}
+            </button>
+          )
+        )}
+      </div>
+
+      <button
+        type="button"
+        onClick={() => onPage(page + 1)}
+        disabled={page >= totalPages - 1}
+        className="flex h-8 items-center gap-1 rounded-chip border border-white/5 bg-surface-1 px-3 text-[12px] text-ink-secondary transition hover:bg-surface-2 hover:text-ink-primary disabled:cursor-not-allowed disabled:opacity-30"
+        aria-label="Next page"
+      >
+        Next
+        <Icon name="chevron-right" size={14} />
+      </button>
+    </nav>
   );
 }
