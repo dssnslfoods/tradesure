@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSupabaseAdmin } from "@/lib/supabase/server";
-import { analyzeCryptoSignal } from "@/lib/ai/analyzeCryptoSignal";
+import { analyzeCryptoSignal, analyzeDualModel } from "@/lib/ai/analyzeCryptoSignal";
+import type { AIAnalysisResult } from "@/types/signal";
 import {
   broadcastTelegramMessage,
   buildTelegramMessage,
@@ -135,20 +136,67 @@ export async function POST(req: NextRequest) {
     console.error("[webhook/process] ai-schedule check failed, defaulting to ON:", err);
   }
 
-  let aiResult;
+  let aiResult: AIAnalysisResult | undefined;
   let aiRaw: unknown = null;
+  let aiContext: unknown = null;
+  // Tracked separately so the post-filter and Telegram builder can see the
+  // second model's verdict + whether the two agreed.
+  let secondaryResult: { model: string; provider: string; result: AIAnalysisResult } | null = null;
+  let dualAgreement: { biasAgree: boolean; confidenceDiff: number } | null = null;
+
   try {
-    // Look up admin-selected model. We deliberately re-fetch (instead of
-    // reusing cfg above) so the most recent setting is used per request.
-    let modelId: string | undefined;
+    // Read the freshest model config so admin changes propagate immediately.
+    let aiCfg: {
+      ai_model?: string;
+      ai_mode?: "single" | "compare" | "vote";
+      ai_model_secondary?: string;
+    } = {};
     try {
-      modelId = (await getScheduleConfig()).ai_model;
+      const c = await getScheduleConfig();
+      aiCfg = {
+        ai_model: c.ai_model,
+        ai_mode: c.ai_mode,
+        ai_model_secondary: c.ai_model_secondary,
+      };
     } catch {
-      // Fall through — analyzer will use its own default
+      // Fall through — analyzer uses its own defaults
     }
-    const out = await analyzeCryptoSignal(payload, modelId);
-    aiResult = out.result;
-    aiRaw = out.raw;
+
+    const primaryModel = aiCfg.ai_model;
+    const mode = aiCfg.ai_mode ?? "single";
+    const secondaryModel = aiCfg.ai_model_secondary;
+
+    if ((mode === "compare" || mode === "vote") && secondaryModel && primaryModel) {
+      // Dual-model run — both AIs in parallel, share market context.
+      const dual = await analyzeDualModel(payload, primaryModel, secondaryModel);
+      aiResult = dual.primary.result;
+      secondaryResult = dual.secondary
+        ? {
+            model: dual.secondary.model,
+            provider: dual.secondary.provider,
+            result: dual.secondary.result,
+          }
+        : null;
+      dualAgreement = dual.agreement;
+      aiRaw = {
+        ...(dual.primary.raw as Record<string, unknown>),
+        market_context: dual.context,
+        secondary: dual.secondary,
+        secondary_error: dual.secondaryError,
+        agreement: dual.agreement,
+        ai_mode: mode,
+      };
+      aiContext = dual.context;
+    } else {
+      const out = await analyzeCryptoSignal(payload, primaryModel);
+      aiResult = out.result;
+      aiRaw = {
+        ...(out.raw as Record<string, unknown>),
+        market_context: out.context,
+        ai_mode: "single",
+      };
+      aiContext = out.context;
+    }
   } catch (err) {
     return NextResponse.json(
       {
@@ -167,8 +215,19 @@ export async function POST(req: NextRequest) {
 
   const bkkHour = bangkokHour(payload);
 
+  // Vote-mode: if dual-model active and models disagree → treat as WAIT.
+  const voteRejected =
+    secondaryResult !== null &&
+    dualAgreement !== null &&
+    !dualAgreement.biasAgree &&
+    // Only enforce when the request actually used vote mode (recorded in aiRaw.ai_mode)
+    (aiRaw as { ai_mode?: string })?.ai_mode === "vote";
+
   if (aiResult.bias === "WAIT") {
     outcome = "SKIP_WAIT";
+  } else if (voteRejected) {
+    outcome = "SKIP_WAIT";
+    filterReason = `Vote mode: models disagree — primary=${aiResult.bias}/${aiResult.confidence}%, secondary=${secondaryResult!.result.bias}/${secondaryResult!.result.confidence}%`;
   } else if (bkkHour !== null && BLOCKED_HOURS.includes(bkkHour)) {
     outcome = "SKIP_HOUR";
     filterReason = `Blocked hour ${String(bkkHour).padStart(2, "0")}:00 (BKK) — historical win rate < 40%`;
@@ -237,7 +296,10 @@ export async function POST(req: NextRequest) {
     });
   }
 
-  const message = buildTelegramMessage(payload, aiResult);
+  const message = buildTelegramMessage(payload, aiResult, aiContext, {
+    secondary: secondaryResult,
+    agreement: dualAgreement,
+  });
   const tg = await broadcastTelegramMessage(message);
 
   if (tg.ok) {

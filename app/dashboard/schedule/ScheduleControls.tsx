@@ -8,6 +8,7 @@ import {
   setAiActiveWindows,
   setAiActiveDays,
   setAiModel,
+  setAiDualMode,
   setAiApiKey,
   processQueuedSignals,
   triggerRunNow,
@@ -50,6 +51,15 @@ export default function ScheduleControls({
   const [interval, setIntervalState] = useState(config.interval_minutes);
   const [retention, setRetention] = useState(config.card_retention_days);
   const [model, setModel] = useState(config.ai_model || DEFAULT_AI_MODEL);
+  const [aiMode, setAiMode] = useState<"single" | "compare" | "vote">(
+    config.ai_mode ?? "single"
+  );
+  const [secondaryModel, setSecondaryModel] = useState(
+    config.ai_model_secondary || "gemini-2.5-flash"
+  );
+  const dualChanged =
+    aiMode !== (config.ai_mode ?? "single") ||
+    secondaryModel !== (config.ai_model_secondary || "gemini-2.5-flash");
   const [openaiKey, setOpenaiKey] = useState("");
   const [geminiKey, setGeminiKey] = useState("");
   const [windows, setWindows] = useState<AiWindow[]>(
@@ -315,6 +325,113 @@ export default function ScheduleControls({
               Save model
             </button>
           </div>
+        </div>
+      </div>
+
+      {/* Dual-model mode (run GPT + Gemini in parallel) */}
+      <div className="card space-y-4 p-5">
+        <div>
+          <div className="flex items-center gap-2">
+            <Icon name="device-analytics" size={14} className="text-sig-info" />
+            <span className="text-[14px] font-semibold text-ink-primary">
+              Dual-model comparison
+            </span>
+            <span
+              className={`chip !text-[10px] ${
+                config.ai_mode === "vote"
+                  ? "chip-buy"
+                  : config.ai_mode === "compare"
+                  ? "chip-info"
+                  : "chip-mute"
+              }`}
+            >
+              {config.ai_mode === "vote"
+                ? "Vote (consensus)"
+                : config.ai_mode === "compare"
+                ? "Compare (parallel)"
+                : "Single (default)"}
+            </span>
+          </div>
+          <p className="mt-1 max-w-xl text-[11px] text-ink-muted">
+            รัน <span className="text-ink-secondary">GPT + Gemini พร้อมกัน</span>{" "}
+            แล้วเปรียบเทียบผล. ⚠️ cost ×2 ของแต่ละ signal.
+            <br />
+            <span className="font-mono text-[10px]">single</span> = primary อย่างเดียว
+            (default){" "}
+            <span className="font-mono text-[10px]">compare</span> = ทั้งคู่ทำงาน
+            แสดงทั้ง 2 ความเห็น{" "}
+            <span className="font-mono text-[10px]">vote</span> = ส่ง Telegram เฉพาะตอนทั้ง 2 agree
+          </p>
+        </div>
+
+        {/* Mode buttons */}
+        <div className="flex flex-wrap items-center gap-2">
+          {[
+            { key: "single" as const, label: "Single", desc: "primary เท่านั้น" },
+            { key: "compare" as const, label: "Compare", desc: "ทั้ง 2 ตัว · ดูทั้งคู่" },
+            { key: "vote" as const, label: "Vote", desc: "ต้อง agree ถึงส่ง" },
+          ].map((m) => (
+            <button
+              key={m.key}
+              type="button"
+              onClick={() => setAiMode(m.key)}
+              className={`h-9 rounded-chip border px-3 text-[12px] transition ${
+                aiMode === m.key
+                  ? "border-brand/40 bg-brand/15 text-brand"
+                  : "border-white/5 bg-surface-2/60 text-ink-muted hover:text-ink-primary"
+              }`}
+            >
+              <span className="font-semibold">{m.label}</span>
+              <span className="ml-1.5 text-[10px] opacity-70">— {m.desc}</span>
+            </button>
+          ))}
+        </div>
+
+        {/* Secondary model picker — only relevant when not "single" */}
+        {aiMode !== "single" && (
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-[11px] font-semibold uppercase tracking-eyebrow text-ink-muted">
+              Secondary model:
+            </span>
+            <select
+              value={secondaryModel}
+              onChange={(e) => setSecondaryModel(e.target.value)}
+              className="h-9 min-w-[240px] rounded-chip border border-white/5 bg-surface-2/60 px-3 font-mono text-[13px] text-ink-primary"
+            >
+              <optgroup label="OpenAI (GPT)">
+                {AI_MODELS.filter((m) => m.provider === "openai").map((m) => (
+                  <option key={m.id} value={m.id}>
+                    {m.label}
+                    {m.recommended ? " ⭐" : ""}
+                  </option>
+                ))}
+              </optgroup>
+              <optgroup label="Google Gemini">
+                {AI_MODELS.filter((m) => m.provider === "gemini").map((m) => (
+                  <option key={m.id} value={m.id}>
+                    {m.label}
+                    {m.recommended ? " ⭐" : ""}
+                  </option>
+                ))}
+              </optgroup>
+            </select>
+            <span className="text-[10px] text-ink-muted">
+              {(() => {
+                const m = findModel(secondaryModel);
+                return m ? `${m.provider} · ${m.description ?? ""}` : "";
+              })()}
+            </span>
+          </div>
+        )}
+
+        <div className="flex items-center justify-end">
+          <button
+            disabled={pending || !dualChanged}
+            onClick={() => safeRun(() => setAiDualMode(aiMode, secondaryModel))}
+            className="btn btn-secondary disabled:opacity-50"
+          >
+            Save mode
+          </button>
         </div>
       </div>
 

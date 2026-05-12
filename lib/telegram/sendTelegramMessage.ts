@@ -1,4 +1,5 @@
 import type { AIAnalysisResult, TradingViewPayload } from "@/types/signal";
+import type { MarketContext } from "@/lib/market/context";
 
 function escapeHtml(s: string): string {
   return String(s)
@@ -44,9 +45,68 @@ function pickNumber(...candidates: unknown[]): number | null {
   return null;
 }
 
+// Renders a 3-line market-context block. Returns "" if all three metrics are
+// unavailable so callers don't get a stray header.
+function renderMarketContext(ctx: unknown): string[] {
+  const c = ctx as MarketContext | null | undefined;
+  if (!c) return [];
+  const lines: string[] = [];
+  if (c.fearGreed) {
+    const emoji =
+      c.fearGreed.value < 25 ? "😱"
+      : c.fearGreed.value < 50 ? "😨"
+      : c.fearGreed.value < 75 ? "😐"
+      : "🤑";
+    lines.push(`${emoji} Fear & Greed: <b>${c.fearGreed.value}</b> (${escapeHtml(c.fearGreed.classification)})`);
+  }
+  if (c.btcDominance) {
+    lines.push(`₿ BTC Dominance: <b>${c.btcDominance.value}%</b>`);
+  }
+  if (c.funding) {
+    const pct = (c.funding.rate * 100).toFixed(4);
+    const sign = c.funding.rate >= 0 ? "+" : "";
+    const tag =
+      c.funding.rate > 0.0005 ? " ⚠️ longs crowded"
+      : c.funding.rate < -0.0005 ? " ⚠️ shorts crowded"
+      : "";
+    lines.push(`💸 Funding (8h): <b>${sign}${pct}%</b>${tag}`);
+  }
+  if (lines.length === 0) return [];
+  return ["📊 <b>Market Context</b>", ...lines];
+}
+
+interface SecondOpinion {
+  secondary: {
+    model: string;
+    provider: string;
+    result: AIAnalysisResult;
+  } | null;
+  agreement: { biasAgree: boolean; confidenceDiff: number } | null;
+}
+
+function renderSecondOpinion(opt: SecondOpinion | undefined): string[] {
+  if (!opt?.secondary) return [];
+  const s = opt.secondary;
+  const a = opt.agreement;
+  const verdict = a?.biasAgree ? "✅ agree" : "❌ disagree";
+  const lines: string[] = [
+    `🤝 <b>Second opinion (${escapeHtml(s.model)})</b> — ${verdict}`,
+    `Bias: <b>${escapeHtml(s.result.bias)}</b> · Confidence: <b>${s.result.confidence}%</b> · Risk: ${escapeHtml(s.result.risk_level)}`,
+    `<i>${escapeHtml(s.result.summary_th)}</i>`,
+  ];
+  if (a && !a.biasAgree) {
+    lines.push(`⚠️ <b>Models disagree</b> — เทรดด้วยความระมัดระวัง`);
+  } else if (a && a.confidenceDiff > 20) {
+    lines.push(`⚠️ confidence ต่างกัน <b>${a.confidenceDiff}pts</b>`);
+  }
+  return lines;
+}
+
 export function buildTelegramMessage(
   payload: TradingViewPayload,
-  ai: AIAnalysisResult
+  ai: AIAnalysisResult,
+  ctx?: unknown,
+  secondOpinion?: SecondOpinion
 ): string {
   // Prefer numeric values from Pine payload (most accurate), fall back to AI numeric.
   // For % computation we use the signal price (the actual fill reference)
@@ -92,6 +152,8 @@ export function buildTelegramMessage(
   }
 
   const isWait = ai.bias === "WAIT";
+  const contextLines = renderMarketContext(ctx);
+  const secondOpinionLines = renderSecondOpinion(secondOpinion);
 
   // ============= WAIT message: clear NO TRADE banner, no levels =============
   if (isWait) {
@@ -113,12 +175,20 @@ export function buildTelegramMessage(
       "",
       "📝 <b>รายละเอียด:</b>",
       escapeHtml(ai.reasoning_th),
+    ];
+    if (secondOpinionLines.length > 0) {
+      lines.push("", ...secondOpinionLines);
+    }
+    if (contextLines.length > 0) {
+      lines.push("", ...contextLines);
+    }
+    lines.push(
       "",
       "💡 <i>รอสัญญาณที่ชัดเจนกว่านี้</i>",
       "",
       "━━━━━━━━━━━━━━━━━━━━",
-      "⚠️ <i>หมายเหตุ: ข้อมูลนี้เป็นเพียงการวิเคราะห์เพื่อประกอบการตัดสินใจ ไม่ใช่คำแนะนำทางการเงิน</i>",
-    ];
+      "⚠️ <i>หมายเหตุ: ข้อมูลนี้เป็นเพียงการวิเคราะห์เพื่อประกอบการตัดสินใจ ไม่ใช่คำแนะนำทางการเงิน</i>"
+    );
     return lines.join("\n");
   }
 
@@ -152,7 +222,15 @@ export function buildTelegramMessage(
     escapeHtml(ai.summary_th),
     "",
     "📝 <b>เหตุผล:</b>",
-    escapeHtml(ai.reasoning_th),
+    escapeHtml(ai.reasoning_th)
+  );
+  if (secondOpinionLines.length > 0) {
+    lines.push("", ...secondOpinionLines);
+  }
+  if (contextLines.length > 0) {
+    lines.push("", ...contextLines);
+  }
+  lines.push(
     "",
     "⚠️ <i>หมายเหตุ: ข้อมูลนี้เป็นเพียงการวิเคราะห์เพื่อประกอบการตัดสินใจ ไม่ใช่คำแนะนำทางการเงิน</i>"
   );

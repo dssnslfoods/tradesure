@@ -124,6 +124,27 @@ export async function setAiModel(modelId: string) {
   revalidatePath("/dashboard/schedule");
 }
 
+export async function setAiDualMode(
+  mode: "single" | "compare" | "vote",
+  secondaryModel: string
+) {
+  await requireAdminOrThrow();
+  if (mode !== "single" && mode !== "compare" && mode !== "vote") {
+    throw new Error("Invalid AI mode");
+  }
+  if (mode !== "single") {
+    const { findModel } = await import("@/lib/ai/models");
+    if (!findModel(secondaryModel)) {
+      throw new Error(`Unknown secondary AI model: ${secondaryModel}`);
+    }
+  }
+  await updateScheduleConfig({
+    ai_mode: mode,
+    ai_model_secondary: secondaryModel,
+  });
+  revalidatePath("/dashboard/schedule");
+}
+
 export async function processQueuedSignals() {
   await requireAdminOrThrow();
   const base =

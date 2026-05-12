@@ -22,6 +22,14 @@ export interface BacktestScheduleConfig {
   // AI model selection — picked from lib/ai/models.ts catalog. Falls back to
   // DEFAULT_AI_MODEL when empty. Provider is inferred from the model id.
   ai_model: string;
+  // Dual-model "second opinion" mode. When enabled, every signal runs through
+  // both `ai_model` (primary) and `ai_model_secondary` in parallel.
+  //   - "single" : only primary (default, cheapest)
+  //   - "compare": both run, both shown in Telegram + persisted, no gating
+  //   - "vote"   : both must agree on bias (and pass confidence threshold) to
+  //                send Telegram; disagreements fall through to SKIP_WAIT
+  ai_mode: "single" | "compare" | "vote";
+  ai_model_secondary: string;
 
   // ── AI active schedule (Phase 2: multi-window + day-of-week) ──────────
   // Outside this schedule, BUY/SELL webhooks are accepted but no AI analysis
@@ -62,6 +70,8 @@ const DEFAULT_CONFIG: BacktestScheduleConfig = {
   paused_reason: null,
   card_retention_days: 7,
   ai_model: "gpt-4o-mini",   // catalog default — keep in sync with DEFAULT_AI_MODEL
+  ai_mode: "single",
+  ai_model_secondary: "gemini-2.5-flash", // sensible default if admin flips to compare/vote
   ai_active_windows: [],     // empty == always on
   ai_active_days: ALL_DAYS,  // all 7 days
   ai_active_hours_start: 0,

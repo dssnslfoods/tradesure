@@ -3,6 +3,7 @@ import type { AIAnalysisResult, AIBias, RiskLevel, TradingViewPayload } from "@/
 import { callGemini } from "./gemini";
 import { DEFAULT_AI_MODEL, providerFor } from "./models";
 import { getApiKeys } from "@/lib/schedule/settings";
+import { getMarketContext, type MarketContext } from "@/lib/market/context";
 
 const SYSTEM_PROMPT = `คุณคือผู้ช่วยวิเคราะห์สัญญาณการเทรด Bitcoin / Crypto
 - ตอบเป็นภาษาไทยเท่านั้น
@@ -41,9 +42,24 @@ const SYSTEM_PROMPT = `คุณคือผู้ช่วยวิเครา
 === กฎ checklist ===
 ต้องตอบ field "checklist" เป็น JSON object ระบุว่าผ่านเงื่อนไขใดบ้าง:
 { "trend_aligned": bool, "volume_confirms": bool, "rsi_in_zone": bool, "rr_acceptable": bool, "regime": "TRENDING"|"RANGING"|"VOLATILE" }
-ต้องผ่านอย่างน้อย 3/4 ถึงให้ LONG/SHORT ได้ (regime = RANGING → WAIT เสมอ)`;
+ต้องผ่านอย่างน้อย 3/4 ถึงให้ LONG/SHORT ได้ (regime = RANGING → WAIT เสมอ)
 
-function buildUserPrompt(p: TradingViewPayload): string {
+=== Market Context Rules (สำคัญ — ปรับ confidence ตาม macro) ===
+• Fear & Greed Index:
+  - 0-25 (Extreme Fear): contrarian LONG opportunity, แต่เทรนด์อาจเปลี่ยน → LONG confidence +5, SHORT confidence -10
+  - 25-50 (Fear): normal trading conditions
+  - 50-75 (Greed): normal trading conditions
+  - 75-100 (Extreme Greed): top-blow risk สูง → LONG confidence -10, SHORT confidence +5
+• Funding Rate (8h, BTCUSDT perp):
+  - > +0.05% (longs paying เยอะ): long squeeze risk → LONG confidence -10
+  - > +0.10% (extreme): crowded longs → LONG → WAIT แทน
+  - < -0.05%: short squeeze risk → SHORT confidence -10, LONG confidence +5
+• BTC Dominance:
+  - > 55% และกำลังขึ้น: alts underperform → SHORT alts ปลอดภัยกว่า
+  - < 50% และกำลังลง: alt season → LONG alts ได้แต่ระวัง BTC ลง
+- ระบุใน reasoning_th ด้วยว่า market context ส่งผลต่อ confidence อย่างไร`;
+
+function buildUserPrompt(p: TradingViewPayload, ctx?: MarketContext): string {
   // Payload from Pine v2 includes adx, atr, atr_pct, htf_ema, volume, volume_ma — wire them in
   const pp = p as TradingViewPayload & {
     adx?: number | string;
@@ -71,6 +87,37 @@ function buildUserPrompt(p: TradingViewPayload): string {
         : "below HTF (bearish bias)"
       : "-";
 
+  // Build macro context block if available — AI uses this to adjust confidence
+  let macroBlock = "";
+  if (ctx) {
+    const lines: string[] = ["=== Macro / Market Context ==="];
+    if (ctx.fearGreed) {
+      lines.push(
+        `Fear & Greed: ${ctx.fearGreed.value}/100 (${ctx.fearGreed.classification})`
+      );
+    } else {
+      lines.push("Fear & Greed: - (unavailable)");
+    }
+    if (ctx.btcDominance) {
+      lines.push(`BTC Dominance: ${ctx.btcDominance.value}%`);
+    } else {
+      lines.push("BTC Dominance: - (unavailable)");
+    }
+    if (ctx.funding) {
+      const pct = (ctx.funding.rate * 100).toFixed(4);
+      const tag =
+        ctx.funding.rate > 0.0005
+          ? " ⚠️ longs crowded"
+          : ctx.funding.rate < -0.0005
+          ? " ⚠️ shorts crowded"
+          : " (neutral)";
+      lines.push(`Funding Rate (8h): ${ctx.funding.rate >= 0 ? "+" : ""}${pct}%${tag}`);
+    } else {
+      lines.push("Funding Rate: - (unavailable)");
+    }
+    macroBlock = "\n\n" + lines.join("\n");
+  }
+
   return `วิเคราะห์สัญญาณ Crypto จาก TradingView ต่อไปนี้:
 
 เหรียญ (symbol): ${p.symbol}
@@ -88,7 +135,7 @@ Trend EMA: ${pp.trend_ema ?? "-"}
 HTF EMA50: ${pp.htf_ema ?? "-"} (${htfBias})
 Volume vs MA: ${volMult}× (>1.3× = good, <0.8× = weak)
 เวลา: ${p.time}
-หมายเหตุ: ${p.note ?? "-"}
+หมายเหตุ: ${p.note ?? "-"}${macroBlock}
 
 ตอบกลับเป็น JSON ตามรูปแบบนี้เท่านั้น:
 {
@@ -187,15 +234,34 @@ async function callOpenAi(
 export async function analyzeCryptoSignal(
   payload: TradingViewPayload,
   modelId?: string
-): Promise<{ result: AIAnalysisResult; raw: unknown; model: string; provider: string }> {
+): Promise<{
+  result: AIAnalysisResult;
+  raw: unknown;
+  model: string;
+  provider: string;
+  context: MarketContext;
+}> {
   // Priority: explicit arg > env override > catalog default
   const targetModel = modelId || process.env.OPENAI_MODEL || DEFAULT_AI_MODEL;
   const provider = providerFor(targetModel);
-  const userPrompt = buildUserPrompt(payload);
 
-  // Resolve API key once per call — DB key (admin-set) takes precedence
-  // over env vars. getApiKeys() already handles the env fallback.
-  const keys = await getApiKeys();
+  // Fetch macro context in parallel with key lookup so the AI sees Fear &
+  // Greed + BTC.D + funding rate alongside the technical signal. Failures
+  // are silent — the prompt just shows "unavailable".
+  const [context, keys] = await Promise.all([
+    getMarketContext(payload.symbol).catch(() => ({
+      fearGreed: null,
+      btcDominance: null,
+      funding: null,
+      fetchedAt: new Date().toISOString(),
+      cached: false,
+    } satisfies MarketContext)),
+    getApiKeys(),
+  ]);
+  const userPrompt = buildUserPrompt(payload, context);
+
+  // Resolve API key — DB key (admin-set) takes precedence over env vars.
+  // getApiKeys() already handles the env fallback (called above).
   const apiKey = provider === "gemini" ? keys.gemini : keys.openai;
 
   let content: string;
@@ -238,5 +304,90 @@ export async function analyzeCryptoSignal(
     reasoning_th: String(parsed.reasoning_th ?? "-"),
   };
 
-  return { result, raw: parsed, model: targetModel, provider };
+  return { result, raw: parsed, model: targetModel, provider, context };
+}
+
+/** Output of a dual-model run. */
+export interface DualAnalysisOutput {
+  primary: {
+    model: string;
+    provider: string;
+    result: AIAnalysisResult;
+    raw: unknown;
+  };
+  secondary: {
+    model: string;
+    provider: string;
+    result: AIAnalysisResult;
+    raw: unknown;
+  } | null;
+  secondaryError?: string;
+  context: MarketContext;
+  agreement: {
+    biasAgree: boolean;     // both LONG, both SHORT, or both WAIT
+    confidenceDiff: number; // |primary - secondary|
+  } | null;
+}
+
+/**
+ * Runs primary AND secondary models in parallel. The primary's result is
+ * always returned; the secondary is best-effort (a failure is captured but
+ * does not break the pipeline). Callers decide whether to gate on agreement
+ * via the `agreement` field (see ai_mode="vote" in webhook/process).
+ *
+ * Both calls share the same market context (fetched once, before the calls).
+ */
+export async function analyzeDualModel(
+  payload: TradingViewPayload,
+  primaryModel: string,
+  secondaryModel: string
+): Promise<DualAnalysisOutput> {
+  const [p, s] = await Promise.allSettled([
+    analyzeCryptoSignal(payload, primaryModel),
+    analyzeCryptoSignal(payload, secondaryModel),
+  ]);
+
+  if (p.status === "rejected") {
+    // If primary failed, surface the error — there's no fallback because
+    // PENDING signals downstream need a primary verdict to act on.
+    throw p.reason instanceof Error ? p.reason : new Error(String(p.reason));
+  }
+
+  const primary = p.value;
+  const secondary = s.status === "fulfilled" ? s.value : null;
+  const secondaryError =
+    s.status === "rejected"
+      ? s.reason instanceof Error
+        ? s.reason.message
+        : String(s.reason)
+      : undefined;
+
+  const agreement = secondary
+    ? {
+        biasAgree: primary.result.bias === secondary.result.bias,
+        confidenceDiff: Math.abs(
+          primary.result.confidence - secondary.result.confidence
+        ),
+      }
+    : null;
+
+  return {
+    primary: {
+      model: primary.model,
+      provider: primary.provider,
+      result: primary.result,
+      raw: primary.raw,
+    },
+    secondary: secondary
+      ? {
+          model: secondary.model,
+          provider: secondary.provider,
+          result: secondary.result,
+          raw: secondary.raw,
+        }
+      : null,
+    secondaryError,
+    context: primary.context,
+    agreement,
+  };
 }
