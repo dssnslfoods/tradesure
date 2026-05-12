@@ -24,12 +24,13 @@ export async function callGemini(
   model: string,
   systemPrompt: string,
   userPrompt: string,
-  temperature = 0
+  temperature = 0,
+  apiKeyOverride?: string | null
 ): Promise<string> {
-  const apiKey = process.env.GEMINI_API_KEY;
+  const apiKey = apiKeyOverride ?? process.env.GEMINI_API_KEY;
   if (!apiKey) {
     throw new Error(
-      "Missing GEMINI_API_KEY — get one at https://aistudio.google.com/apikey then set in Firebase env"
+      "Missing GEMINI_API_KEY — set it in /dashboard/schedule (admin) or as Firebase env var. Get a key at https://aistudio.google.com/apikey"
     );
   }
 

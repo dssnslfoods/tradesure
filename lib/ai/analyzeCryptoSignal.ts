@@ -2,6 +2,7 @@ import OpenAI from "openai";
 import type { AIAnalysisResult, AIBias, RiskLevel, TradingViewPayload } from "@/types/signal";
 import { callGemini } from "./gemini";
 import { DEFAULT_AI_MODEL, providerFor } from "./models";
+import { getApiKeys } from "@/lib/schedule/settings";
 
 const SYSTEM_PROMPT = `คุณคือผู้ช่วยวิเคราะห์สัญญาณการเทรด Bitcoin / Crypto
 - ตอบเป็นภาษาไทยเท่านั้น
@@ -145,10 +146,15 @@ function coerceNumeric(v: unknown): number | null {
 async function callOpenAi(
   model: string,
   systemPrompt: string,
-  userPrompt: string
+  userPrompt: string,
+  apiKeyOverride?: string | null
 ): Promise<string> {
-  const apiKey = process.env.OPENAI_API_KEY;
-  if (!apiKey) throw new Error("Missing OPENAI_API_KEY");
+  const apiKey = apiKeyOverride ?? process.env.OPENAI_API_KEY;
+  if (!apiKey) {
+    throw new Error(
+      "Missing OPENAI_API_KEY — set it in /dashboard/schedule (admin) or as Firebase env var"
+    );
+  }
 
   const client = new OpenAI({ apiKey });
 
@@ -187,11 +193,16 @@ export async function analyzeCryptoSignal(
   const provider = providerFor(targetModel);
   const userPrompt = buildUserPrompt(payload);
 
+  // Resolve API key once per call — DB key (admin-set) takes precedence
+  // over env vars. getApiKeys() already handles the env fallback.
+  const keys = await getApiKeys();
+  const apiKey = provider === "gemini" ? keys.gemini : keys.openai;
+
   let content: string;
   if (provider === "gemini") {
-    content = await callGemini(targetModel, SYSTEM_PROMPT, userPrompt);
+    content = await callGemini(targetModel, SYSTEM_PROMPT, userPrompt, 0, apiKey);
   } else {
-    content = await callOpenAi(targetModel, SYSTEM_PROMPT, userPrompt);
+    content = await callOpenAi(targetModel, SYSTEM_PROMPT, userPrompt, apiKey);
   }
 
   let parsed: Record<string, unknown> = {};

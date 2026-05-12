@@ -1,6 +1,10 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import { getScheduleConfig, listRecentRuns } from "@/lib/schedule/settings";
+import {
+  getScheduleConfig,
+  getMaskedApiKeys,
+  listRecentRuns,
+} from "@/lib/schedule/settings";
 import { getSupabaseAdmin } from "@/lib/supabase/server";
 import { getCurrentUser } from "@/lib/auth/guards";
 import ScheduleControls from "./ScheduleControls";
@@ -58,6 +62,7 @@ export default async function SchedulePage() {
   const config = await getScheduleConfig();
   const runs = await listRecentRuns(20);
   const queuedCount = await countQueuedSignals();
+  const apiKeys = await getMaskedApiKeys();
 
   const totalEvaluated = runs.reduce((a, r) => a + r.evaluated, 0);
   const cronRuns = runs.filter((r) => r.triggered_by === "cron").length;
@@ -105,7 +110,7 @@ export default async function SchedulePage() {
         />
       </section>
 
-      <ScheduleControls config={config} queuedCount={queuedCount} />
+      <ScheduleControls config={config} queuedCount={queuedCount} apiKeys={apiKeys} />
 
       <section className="mt-7">
         <div className="mb-3 flex items-center gap-2">

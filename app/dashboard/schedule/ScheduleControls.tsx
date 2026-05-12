@@ -8,6 +8,7 @@ import {
   setAiActiveWindows,
   setAiActiveDays,
   setAiModel,
+  setAiApiKey,
   processQueuedSignals,
   triggerRunNow,
 } from "./actions";
@@ -15,6 +16,7 @@ import {
   isWithinAiSchedule,
   type AiWindow,
   type BacktestScheduleConfig,
+  type MaskedApiKeys,
 } from "@/lib/schedule/settings";
 import { AI_MODELS, findModel, DEFAULT_AI_MODEL } from "@/lib/ai/models";
 import Icon from "@/components/ui/Icon";
@@ -38,14 +40,18 @@ function describeWindows(windows: AiWindow[]): string {
 export default function ScheduleControls({
   config,
   queuedCount,
+  apiKeys,
 }: {
   config: BacktestScheduleConfig;
   queuedCount: number;
+  apiKeys: MaskedApiKeys;
 }) {
   const [pending, start] = useTransition();
   const [interval, setIntervalState] = useState(config.interval_minutes);
   const [retention, setRetention] = useState(config.card_retention_days);
   const [model, setModel] = useState(config.ai_model || DEFAULT_AI_MODEL);
+  const [openaiKey, setOpenaiKey] = useState("");
+  const [geminiKey, setGeminiKey] = useState("");
   const [windows, setWindows] = useState<AiWindow[]>(
     config.ai_active_windows.length > 0
       ? config.ai_active_windows
@@ -193,6 +199,49 @@ export default function ScheduleControls({
             Save
           </button>
         </div>
+      </div>
+
+      {/* AI provider API keys */}
+      <div className="card space-y-4 p-5">
+        <div>
+          <div className="flex items-center gap-2">
+            <Icon name="key" size={14} className="text-sig-warn" />
+            <span className="text-[14px] font-semibold text-ink-primary">
+              AI provider API keys
+            </span>
+          </div>
+          <p className="mt-1 max-w-xl text-[11px] text-ink-muted">
+            ตั้งค่า key สำหรับแต่ละ provider โดยตรง — ไม่ต้องแก้ env แล้ว redeploy.
+            Key จะ <span className="text-ink-secondary">ไม่ถูกแสดงเต็ม</span> ตอนโหลดหน้านี้ใหม่ ระบบเก็บปลอดภัยใน database (service-role only).
+            ถ้าตั้งที่นี่ → จะ override env var โดยอัตโนมัติ.
+          </p>
+        </div>
+
+        <ApiKeyRow
+          label="OpenAI"
+          providerLabel="OpenAI"
+          status={apiKeys.openai}
+          value={openaiKey}
+          onChange={setOpenaiKey}
+          placeholder="sk-proj-… (paste new key to replace)"
+          pending={pending}
+          onSave={() => safeRun(async () => { await setAiApiKey("openai", openaiKey); setOpenaiKey(""); setMsg("OpenAI key saved"); })}
+          onClear={() => safeRun(async () => { await setAiApiKey("openai", null); setOpenaiKey(""); setMsg("OpenAI key cleared (env fallback active)"); })}
+          helpUrl="https://platform.openai.com/api-keys"
+        />
+
+        <ApiKeyRow
+          label="Google Gemini"
+          providerLabel="Gemini"
+          status={apiKeys.gemini}
+          value={geminiKey}
+          onChange={setGeminiKey}
+          placeholder="AIza… (paste new key to replace)"
+          pending={pending}
+          onSave={() => safeRun(async () => { await setAiApiKey("gemini", geminiKey); setGeminiKey(""); setMsg("Gemini key saved"); })}
+          onClear={() => safeRun(async () => { await setAiApiKey("gemini", null); setGeminiKey(""); setMsg("Gemini key cleared (env fallback active)"); })}
+          helpUrl="https://aistudio.google.com/apikey"
+        />
       </div>
 
       {/* AI model picker */}
@@ -502,6 +551,93 @@ export default function ScheduleControls({
           {msg}
         </p>
       )}
+    </div>
+  );
+}
+
+function ApiKeyRow({
+  label,
+  providerLabel,
+  status,
+  value,
+  onChange,
+  placeholder,
+  pending,
+  onSave,
+  onClear,
+  helpUrl,
+}: {
+  label: string;
+  providerLabel: string;
+  status: MaskedApiKeys["openai"];
+  value: string;
+  onChange: (v: string) => void;
+  placeholder: string;
+  pending: boolean;
+  onSave: () => void;
+  onClear: () => void;
+  helpUrl: string;
+}) {
+  const sourceBadge =
+    status.source === "db"
+      ? { label: "DB", className: "chip-buy" }
+      : status.source === "env"
+      ? { label: "ENV", className: "chip-info" }
+      : { label: "Not set", className: "chip-warn" };
+
+  return (
+    <div className="rounded-chip border border-white/5 bg-surface-2/40 p-3">
+      <div className="mb-2 flex flex-wrap items-center gap-2">
+        <span className="text-[13px] font-semibold text-ink-primary">{label}</span>
+        <span className={`chip !text-[10px] ${sourceBadge.className}`}>
+          {sourceBadge.label}
+        </span>
+        {status.configured && status.mask && (
+          <span className="font-mono text-[11px] text-ink-muted">{status.mask}</span>
+        )}
+        <a
+          href={helpUrl}
+          target="_blank"
+          rel="noreferrer"
+          className="ml-auto inline-flex items-center gap-1 text-[11px] text-brand hover:underline"
+        >
+          <Icon name="external" size={11} />
+          Get key
+        </a>
+      </div>
+      <div className="flex flex-wrap items-center gap-2">
+        <input
+          type="password"
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          placeholder={placeholder}
+          autoComplete="new-password"
+          className="h-9 flex-1 min-w-[200px] rounded-chip border border-white/5 bg-surface-1 px-3 font-mono text-[12px] text-ink-primary placeholder:text-ink-faint"
+        />
+        <button
+          disabled={pending || value.trim().length === 0}
+          onClick={onSave}
+          className="btn btn-secondary disabled:opacity-50"
+        >
+          Save
+        </button>
+        {status.source === "db" && (
+          <button
+            disabled={pending}
+            onClick={onClear}
+            className="btn !bg-sig-sell/10 !border-sig-sell/30 !text-sig-sell hover:!bg-sig-sell/20 disabled:opacity-50"
+          >
+            Clear
+          </button>
+        )}
+      </div>
+      <p className="mt-1.5 text-[10px] text-ink-faint">
+        {status.source === "db"
+          ? `${providerLabel} key มาจาก database — override env var`
+          : status.source === "env"
+          ? `${providerLabel} key มาจาก env var — แทนที่ได้โดยใส่ key ใหม่`
+          : `ยังไม่ได้ตั้ง ${providerLabel} key — ใส่ที่นี่หรือตั้ง env var`}
+      </p>
     </div>
   );
 }

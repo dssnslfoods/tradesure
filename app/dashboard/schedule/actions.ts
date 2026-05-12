@@ -2,7 +2,11 @@
 
 import { revalidatePath } from "next/cache";
 import { cookies } from "next/headers";
-import { updateScheduleConfig } from "@/lib/schedule/settings";
+import {
+  updateScheduleConfig,
+  setApiKey as persistApiKey,
+  type AiKeyProvider,
+} from "@/lib/schedule/settings";
 import { isCurrentUserAdmin } from "@/lib/auth/guards";
 
 async function requireAdminOrThrow() {
@@ -86,6 +90,26 @@ export async function setAiActiveDays(days: number[]) {
   await updateScheduleConfig({ ai_active_days: clean });
   revalidatePath("/dashboard/schedule");
   revalidatePath("/dashboard");
+}
+
+export async function setAiApiKey(provider: AiKeyProvider, key: string | null) {
+  await requireAdminOrThrow();
+  if (provider !== "openai" && provider !== "gemini") {
+    throw new Error("Invalid provider");
+  }
+  // Light validation — full validation happens on first real API call. We do
+  // catch obvious paste mistakes (extra quotes, very short string) up front.
+  if (typeof key === "string" && key.trim().length > 0) {
+    const k = key.trim();
+    if (k.length < 10) throw new Error("API key looks too short");
+    if (provider === "openai" && !/^sk-/.test(k)) {
+      throw new Error('OpenAI keys typically start with "sk-"');
+    }
+  }
+  await persistApiKey(provider, key);
+  revalidatePath("/dashboard/schedule");
+  // Don't return anything — we never want plaintext keys flowing back to client.
+  return { ok: true };
 }
 
 export async function setAiModel(modelId: string) {

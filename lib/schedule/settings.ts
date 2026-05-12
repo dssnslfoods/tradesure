@@ -230,6 +230,125 @@ export interface BacktestRunRow {
   created_at: string;
 }
 
+// ─── AI provider API keys ───────────────────────────────────────────────
+//
+// Stored in app_settings under key="api_keys" so admin can manage them at
+// runtime without redeploying. Full keys NEVER leave the server — UI gets a
+// masked view via getMaskedApiKeys(). Falls back to OPENAI_API_KEY /
+// GEMINI_API_KEY env vars when no DB key is set.
+
+const API_KEYS_SETTING_KEY = "api_keys";
+
+export type AiKeyProvider = "openai" | "gemini";
+
+export interface ApiKeys {
+  openai: string | null;
+  gemini: string | null;
+}
+
+export interface MaskedApiKey {
+  configured: boolean;
+  source: "db" | "env" | "none";
+  mask: string | null; // e.g., "sk-A…b1F2" — never the full key
+}
+
+export interface MaskedApiKeys {
+  openai: MaskedApiKey;
+  gemini: MaskedApiKey;
+}
+
+function maskKey(k: string | null | undefined): string | null {
+  if (!k) return null;
+  if (k.length <= 8) return "•".repeat(k.length);
+  return `${k.slice(0, 4)}…${k.slice(-4)}`;
+}
+
+/**
+ * SERVER ONLY. Returns plaintext keys for use in API calls. Prefer the DB
+ * setting; fall back to env vars so existing deployments keep working.
+ */
+export async function getApiKeys(): Promise<ApiKeys> {
+  const out: ApiKeys = { openai: null, gemini: null };
+  try {
+    const supabase = getSupabaseAdmin();
+    const { data } = await supabase
+      .from("app_settings")
+      .select("value")
+      .eq("key", API_KEYS_SETTING_KEY)
+      .maybeSingle();
+    const val = (data?.value ?? {}) as Partial<ApiKeys>;
+    if (typeof val.openai === "string" && val.openai.length > 0) out.openai = val.openai;
+    if (typeof val.gemini === "string" && val.gemini.length > 0) out.gemini = val.gemini;
+  } catch {
+    // fall through to env
+  }
+  if (!out.openai && process.env.OPENAI_API_KEY) out.openai = process.env.OPENAI_API_KEY;
+  if (!out.gemini && process.env.GEMINI_API_KEY) out.gemini = process.env.GEMINI_API_KEY;
+  return out;
+}
+
+/** UI-safe view. Returns whether keys are set and a partial mask only. */
+export async function getMaskedApiKeys(): Promise<MaskedApiKeys> {
+  // Read DB and env separately so we can tell which source the key came from.
+  let dbOpenai: string | null = null;
+  let dbGemini: string | null = null;
+  try {
+    const supabase = getSupabaseAdmin();
+    const { data } = await supabase
+      .from("app_settings")
+      .select("value")
+      .eq("key", API_KEYS_SETTING_KEY)
+      .maybeSingle();
+    const val = (data?.value ?? {}) as Partial<ApiKeys>;
+    if (typeof val.openai === "string" && val.openai.length > 0) dbOpenai = val.openai;
+    if (typeof val.gemini === "string" && val.gemini.length > 0) dbGemini = val.gemini;
+  } catch {
+    // ignore
+  }
+  const envOpenai = process.env.OPENAI_API_KEY ?? null;
+  const envGemini = process.env.GEMINI_API_KEY ?? null;
+  const buildView = (db: string | null, env: string | null): MaskedApiKey => {
+    if (db) return { configured: true, source: "db", mask: maskKey(db) };
+    if (env) return { configured: true, source: "env", mask: maskKey(env) };
+    return { configured: false, source: "none", mask: null };
+  };
+  return {
+    openai: buildView(dbOpenai, envOpenai),
+    gemini: buildView(dbGemini, envGemini),
+  };
+}
+
+/**
+ * SERVER ONLY. Set or clear a provider's API key. Pass null/empty string to
+ * delete (which means env fallback takes over again).
+ */
+export async function setApiKey(
+  provider: AiKeyProvider,
+  key: string | null
+): Promise<void> {
+  const supabase = getSupabaseAdmin();
+  const { data } = await supabase
+    .from("app_settings")
+    .select("value")
+    .eq("key", API_KEYS_SETTING_KEY)
+    .maybeSingle();
+  const current = (data?.value ?? {}) as Partial<ApiKeys>;
+  const next: ApiKeys = {
+    openai: current.openai ?? null,
+    gemini: current.gemini ?? null,
+  };
+  const trimmed = typeof key === "string" ? key.trim() : "";
+  next[provider] = trimmed.length > 0 ? trimmed : null;
+
+  const { error } = await supabase
+    .from("app_settings")
+    .upsert(
+      { key: API_KEYS_SETTING_KEY, value: next, updated_at: new Date().toISOString() },
+      { onConflict: "key" }
+    );
+  if (error) throw new Error(`setApiKey: ${error.message}`);
+}
+
 export async function listRecentRuns(limit = 20): Promise<BacktestRunRow[]> {
   const supabase = getSupabaseAdmin();
   const { data, error } = await supabase
