@@ -3,11 +3,14 @@ import { redirect } from "next/navigation";
 import {
   getScheduleConfig,
   getMaskedApiKeys,
+  isWithinAiSchedule,
   listRecentRuns,
 } from "@/lib/schedule/settings";
+import { findModel } from "@/lib/ai/models";
 import { getSupabaseAdmin } from "@/lib/supabase/server";
 import { getCurrentUser } from "@/lib/auth/guards";
 import ScheduleControls from "./ScheduleControls";
+import ConfigDetailModal, { type ConfigDetailData } from "./ConfigDetailModal";
 import Icon, { type IconName } from "@/components/ui/Icon";
 
 async function countQueuedSignals(): Promise<number> {
@@ -17,6 +20,33 @@ async function countQueuedSignals(): Promise<number> {
       .from("ai_signal_analysis")
       .select("id", { count: "exact", head: true })
       .eq("outcome", "QUEUED");
+    if (error) return 0;
+    return count ?? 0;
+  } catch {
+    return 0;
+  }
+}
+
+async function countTelegramContacts(): Promise<number> {
+  try {
+    const supabase = getSupabaseAdmin();
+    const { count, error } = await supabase
+      .from("auth_users")
+      .select("id", { count: "exact", head: true })
+      .not("telegram_chat_id", "is", null);
+    if (error) return 0;
+    return count ?? 0;
+  } catch {
+    return 0;
+  }
+}
+
+async function countTotalSignals(): Promise<number> {
+  try {
+    const supabase = getSupabaseAdmin();
+    const { count, error } = await supabase
+      .from("ai_signal_analysis")
+      .select("id", { count: "exact", head: true });
     if (error) return 0;
     return count ?? 0;
   } catch {
@@ -59,10 +89,47 @@ export default async function SchedulePage() {
     );
   }
 
-  const config = await getScheduleConfig();
-  const runs = await listRecentRuns(20);
-  const queuedCount = await countQueuedSignals();
-  const apiKeys = await getMaskedApiKeys();
+  const [config, runs, queuedCount, apiKeys, telegramContactCount, totalSignals] =
+    await Promise.all([
+      getScheduleConfig(),
+      listRecentRuns(20),
+      countQueuedSignals(),
+      getMaskedApiKeys(),
+      countTelegramContacts(),
+      countTotalSignals(),
+    ]);
+
+  // Build the structured payload that powers the View-configuration modal.
+  // We deliberately compute this server-side so secrets/env stay off the wire.
+  const primaryModelInfo = findModel(config.ai_model);
+  const secondaryModelInfo = findModel(config.ai_model_secondary);
+  const configDetail: ConfigDetailData = {
+    config,
+    apiKeys,
+    queuedCount,
+    telegramContactCount,
+    totalSignals,
+    aiActiveNow: isWithinAiSchedule(config.ai_active_windows, config.ai_active_days),
+    primaryModelInfo: primaryModelInfo
+      ? {
+          label: primaryModelInfo.label,
+          provider: primaryModelInfo.provider,
+          description: primaryModelInfo.description,
+        }
+      : null,
+    secondaryModelInfo: secondaryModelInfo
+      ? {
+          label: secondaryModelInfo.label,
+          provider: secondaryModelInfo.provider,
+          description: secondaryModelInfo.description,
+        }
+      : null,
+    envFlags: {
+      MIN_CONFIDENCE: process.env.MIN_CONFIDENCE ?? "70",
+      BLOCKED_HOURS: process.env.BLOCKED_HOURS ?? "13,14,16,17,20",
+      NOTRADE_TELEGRAM: process.env.NOTRADE_TELEGRAM ?? "1",
+    },
+  };
 
   const totalEvaluated = runs.reduce((a, r) => a + r.evaluated, 0);
   const cronRuns = runs.filter((r) => r.triggered_by === "cron").length;
@@ -80,17 +147,20 @@ export default async function SchedulePage() {
             Pause / resume the auto-evaluator and view recent runs.
           </p>
         </div>
-        <div className="text-right text-[11px] text-ink-muted">
-          <div>Last run: <span className="font-mono text-ink-secondary">{fmtTime(config.last_run_at)}</span></div>
-          {config.last_result && (
-            <div className="mt-1">
-              {config.last_result.evaluated} evaluated ·{" "}
-              <span className="text-sig-buy">{config.last_result.win}W</span> /{" "}
-              <span className="text-sig-sell">{config.last_result.loss}L</span> /{" "}
-              <span className="text-sig-info">{config.last_result.open}O</span> ·{" "}
-              win-rate {config.last_result.win_rate_pct ?? "-"}%
-            </div>
-          )}
+        <div className="flex flex-col items-end gap-2">
+          <ConfigDetailModal data={configDetail} />
+          <div className="text-right text-[11px] text-ink-muted">
+            <div>Last run: <span className="font-mono text-ink-secondary">{fmtTime(config.last_run_at)}</span></div>
+            {config.last_result && (
+              <div className="mt-1">
+                {config.last_result.evaluated} evaluated ·{" "}
+                <span className="text-sig-buy">{config.last_result.win}W</span> /{" "}
+                <span className="text-sig-sell">{config.last_result.loss}L</span> /{" "}
+                <span className="text-sig-info">{config.last_result.open}O</span> ·{" "}
+                win-rate {config.last_result.win_rate_pct ?? "-"}%
+              </div>
+            )}
+          </div>
         </div>
       </header>
 
