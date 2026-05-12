@@ -4,6 +4,10 @@ export interface BacktestScheduleConfig {
   enabled: boolean;
   interval_minutes: number;
   paused_reason: string | null;
+  // Auto-archive cards on the dashboard after N days once they reach a terminal
+  // outcome (WIN_*, LOSS_SL, SKIP_*, NO_DATA, ERROR). 0 = never archive.
+  // Rows stay in the database so analytics keep their full history.
+  card_retention_days: number;
   last_run_at: string | null;
   last_result: {
     evaluated: number;
@@ -20,6 +24,7 @@ const DEFAULT_CONFIG: BacktestScheduleConfig = {
   enabled: true,
   interval_minutes: 15,
   paused_reason: null,
+  card_retention_days: 7,
   last_run_at: null,
   last_result: null,
 };

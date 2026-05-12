@@ -28,6 +28,17 @@ export async function setIntervalMinutes(minutes: number) {
   revalidatePath("/dashboard/schedule");
 }
 
+export async function setCardRetentionDays(days: number) {
+  await requireAdminOrThrow();
+  if (!Number.isFinite(days) || days < 0 || days > 3650) {
+    throw new Error("card_retention_days must be between 0 and 3650");
+  }
+  await updateScheduleConfig({ card_retention_days: Math.round(days) });
+  // Both pages depend on the setting, so refresh both.
+  revalidatePath("/dashboard/schedule");
+  revalidatePath("/dashboard");
+}
+
 export async function triggerRunNow() {
   await requireAdminOrThrow();
   // Internal call: hit our own backtest endpoint with force=1 (overrides paused

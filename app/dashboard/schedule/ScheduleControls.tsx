@@ -1,13 +1,19 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { setEnabled, setIntervalMinutes, triggerRunNow } from "./actions";
+import {
+  setEnabled,
+  setIntervalMinutes,
+  setCardRetentionDays,
+  triggerRunNow,
+} from "./actions";
 import type { BacktestScheduleConfig } from "@/lib/schedule/settings";
 import Icon from "@/components/ui/Icon";
 
 export default function ScheduleControls({ config }: { config: BacktestScheduleConfig }) {
   const [pending, start] = useTransition();
   const [interval, setIntervalState] = useState(config.interval_minutes);
+  const [retention, setRetention] = useState(config.card_retention_days);
   const [reason, setReason] = useState(config.paused_reason ?? "");
   const [msg, setMsg] = useState<string | null>(null);
 
@@ -91,6 +97,37 @@ export default function ScheduleControls({ config }: { config: BacktestScheduleC
           <button
             disabled={pending || interval === config.interval_minutes}
             onClick={() => safeRun(() => setIntervalMinutes(interval))}
+            className="btn btn-secondary disabled:opacity-50"
+          >
+            Save
+          </button>
+        </div>
+      </div>
+
+      {/* Card retention */}
+      <div className="card flex flex-wrap items-center justify-between gap-3 p-5">
+        <div>
+          <div className="text-[14px] font-semibold text-ink-primary">Card retention</div>
+          <p className="mt-1 max-w-md text-[11px] text-ink-muted">
+            Hide trade cards from the dashboard once they reach a terminal outcome
+            (WIN / LOSS / SKIP / NO_TRADE) and are older than N days.
+            <span className="text-ink-secondary"> ข้อมูลในฐานข้อมูลยังเก็บครบ</span>{" "}
+            — สถิติและ analytics ใช้ข้อมูลเต็มเสมอ. ตั้ง <span className="font-mono text-brand">0</span> = ไม่ archive
+          </p>
+        </div>
+        <div className="flex items-center gap-2">
+          <input
+            type="number"
+            min={0}
+            max={3650}
+            value={retention}
+            onChange={(e) => setRetention(Number(e.target.value))}
+            className="h-9 w-20 rounded-chip border border-white/5 bg-surface-2/60 px-3 font-mono text-[13px] tabular text-ink-primary"
+          />
+          <span className="text-[12px] text-ink-muted">days</span>
+          <button
+            disabled={pending || retention === config.card_retention_days}
+            onClick={() => safeRun(() => setCardRetentionDays(retention))}
             className="btn btn-secondary disabled:opacity-50"
           >
             Save

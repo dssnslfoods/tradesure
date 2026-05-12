@@ -1,5 +1,6 @@
 import { getSupabaseAdmin } from "@/lib/supabase/server";
 import { getCurrentUser } from "@/lib/auth/guards";
+import { getScheduleConfig } from "@/lib/schedule/settings";
 import SignalsTable, { type SignalRow } from "./SignalsTable";
 import BacktestButton from "./BacktestButton";
 import StatTile from "@/components/ui/StatTile";
@@ -8,6 +9,19 @@ import LivePrices from "@/components/ui/LivePrices";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
+
+// Outcomes that mean "this card is done evolving" — eligible for auto-archive.
+// OPEN and PENDING stay visible because they still need backtest evaluation.
+const ARCHIVABLE_OUTCOMES = new Set([
+  "WIN_TP1",
+  "WIN_TP2",
+  "LOSS_SL",
+  "SKIP_WAIT",
+  "SKIP_LOW_CONF",
+  "SKIP_HOUR",
+  "NO_DATA",
+  "ERROR",
+]);
 
 interface Row {
   id: string;
@@ -101,8 +115,33 @@ function computeStats(rows: Row[]): Stats {
 export default async function DashboardPage() {
   const me = await getCurrentUser();
   const isAdmin = Boolean(me?.is_admin);
-  const rows = await loadRows();
-  const stats = computeStats(rows);
+  const allRows = await loadRows();
+
+  // Auto-archive terminal cards older than admin-configured retention. We
+  // *display-filter* only — the rows stay in Supabase so analytics keep their
+  // full history. 0 days disables archiving entirely.
+  let retentionDays = 7;
+  try {
+    retentionDays = (await getScheduleConfig()).card_retention_days ?? 7;
+  } catch {
+    // Settings unavailable — fall through with default
+  }
+  const cutoffMs =
+    retentionDays > 0 ? Date.now() - retentionDays * 24 * 60 * 60 * 1000 : 0;
+  const rows =
+    retentionDays > 0
+      ? allRows.filter((r) => {
+          const isArchivable = ARCHIVABLE_OUTCOMES.has(r.outcome ?? "");
+          if (!isArchivable) return true; // OPEN / PENDING always visible
+          const createdMs = new Date(r.created_at).getTime();
+          return createdMs >= cutoffMs;
+        })
+      : allRows;
+
+  // Stats are computed on the FULL row set (no auto-archive) so KPI tiles keep
+  // showing lifetime performance even after old cards drop off the grid.
+  const stats = computeStats(allRows);
+  const archivedCount = allRows.length - rows.length;
 
   // Build a tiny equity-like sparkline from the last decided signals
   const sparkSeed = rows
@@ -217,9 +256,15 @@ export default async function DashboardPage() {
         }))}
       />
 
-      <p className="mt-6 flex items-center gap-2 text-[11px] text-ink-muted">
+      <p className="mt-6 flex flex-wrap items-center gap-2 text-[11px] text-ink-muted">
         <Icon name="info" size={12} />
         Backtest uses Binance public klines. First-touch model: SL assumed first when both hit in same bar (pessimistic). Window = 200 bars after signal time.
+        {archivedCount > 0 && retentionDays > 0 && (
+          <span className="ml-auto inline-flex items-center gap-1 rounded-chip border border-white/5 bg-surface-2/60 px-2 py-1 text-ink-secondary">
+            <Icon name="eye-off" size={11} />
+            ซ่อน {archivedCount} card เก่ากว่า {retentionDays} วัน (สถิติยังนับครบ)
+          </span>
+        )}
       </p>
     </>
   );
