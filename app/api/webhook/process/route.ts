@@ -5,6 +5,10 @@ import {
   broadcastTelegramMessage,
   buildTelegramMessage,
 } from "@/lib/telegram/sendTelegramMessage";
+import {
+  getScheduleConfig,
+  isWithinAiHours,
+} from "@/lib/schedule/settings";
 import type { TradingViewPayload } from "@/types/signal";
 
 export const runtime = "nodejs";
@@ -71,6 +75,31 @@ export async function POST(req: NextRequest) {
   const signalId = body.signal_id;
   const payload = body.payload;
   const supabase = getSupabaseAdmin();
+
+  // ─── AI active-hours gate ────────────────────────────────────────────────
+  // Skip the AI analysis step (and downstream card/Telegram) when admin has
+  // restricted AI to specific hours. The raw `tradingview_signals` row was
+  // already saved by /api/webhook/tradingview — we just don't create the
+  // ai_signal_analysis row, so no card appears on the dashboard and no
+  // Telegram is sent. Settings live in `app_settings.backtest_schedule`.
+  try {
+    const cfg = await getScheduleConfig();
+    if (!isWithinAiHours(cfg.ai_active_hours_start, cfg.ai_active_hours_end)) {
+      return NextResponse.json({
+        ok: true,
+        signal_id: signalId,
+        gated: true,
+        reason: "outside_ai_active_hours",
+        ai_active_hours: {
+          start: cfg.ai_active_hours_start,
+          end: cfg.ai_active_hours_end,
+        },
+      });
+    }
+  } catch (err) {
+    // Settings unavailable — fail open so signals are still analyzed
+    console.error("[webhook/process] ai-hours check failed, defaulting to ON:", err);
+  }
 
   let aiResult;
   let aiRaw: unknown = null;

@@ -39,6 +39,20 @@ export async function setCardRetentionDays(days: number) {
   revalidatePath("/dashboard");
 }
 
+export async function setAiActiveHours(start: number, end: number) {
+  await requireAdminOrThrow();
+  const ok = (n: number) => Number.isFinite(n) && n >= 0 && n <= 23 && Number.isInteger(n);
+  if (!ok(start) || !ok(end)) {
+    throw new Error("ai_active_hours must be integers between 0 and 23");
+  }
+  await updateScheduleConfig({
+    ai_active_hours_start: start,
+    ai_active_hours_end: end,
+  });
+  revalidatePath("/dashboard/schedule");
+  revalidatePath("/dashboard");
+}
+
 export async function triggerRunNow() {
   await requireAdminOrThrow();
   // Internal call: hit our own backtest endpoint with force=1 (overrides paused

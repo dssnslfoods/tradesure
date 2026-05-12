@@ -1,6 +1,6 @@
 import { getSupabaseAdmin } from "@/lib/supabase/server";
 import { getCurrentUser } from "@/lib/auth/guards";
-import { getScheduleConfig } from "@/lib/schedule/settings";
+import { getScheduleConfig, isWithinAiHours } from "@/lib/schedule/settings";
 import SignalsTable, { type SignalRow } from "./SignalsTable";
 import BacktestButton from "./BacktestButton";
 import StatTile from "@/components/ui/StatTile";
@@ -121,11 +121,17 @@ export default async function DashboardPage() {
   // *display-filter* only — the rows stay in Supabase so analytics keep their
   // full history. 0 days disables archiving entirely.
   let retentionDays = 7;
+  let aiStart = 0;
+  let aiEnd = 0;
   try {
-    retentionDays = (await getScheduleConfig()).card_retention_days ?? 7;
+    const cfg = await getScheduleConfig();
+    retentionDays = cfg.card_retention_days ?? 7;
+    aiStart = cfg.ai_active_hours_start ?? 0;
+    aiEnd = cfg.ai_active_hours_end ?? 0;
   } catch {
-    // Settings unavailable — fall through with default
+    // Settings unavailable — fall through with defaults
   }
+  const aiActive = isWithinAiHours(aiStart, aiEnd);
   const cutoffMs =
     retentionDays > 0 ? Date.now() - retentionDays * 24 * 60 * 60 * 1000 : 0;
   const rows =
@@ -180,6 +186,29 @@ export default async function DashboardPage() {
           </div>
         )}
       </div>
+
+      {/* AI off-hours banner — only when admin has configured a window AND we're outside */}
+      {!aiActive && (
+        <div className="mb-5 flex flex-wrap items-center gap-2 rounded-chip border border-sig-warn/30 bg-sig-warn/10 px-4 py-3 text-[12px]">
+          <Icon name="clock" size={14} className="text-sig-warn" />
+          <span className="font-semibold text-sig-warn">AI วิเคราะห์อยู่นอกช่วงเวลาทำงาน</span>
+          <span className="text-ink-secondary">
+            ช่วงทำงาน:{" "}
+            <span className="font-mono text-ink-primary">
+              {String(aiStart).padStart(2, "0")}:00 → {String(aiEnd).padStart(2, "0")}:00 BKK
+            </span>{" "}
+            · webhook ที่เข้ามาในขณะนี้จะถูกบันทึกแต่ไม่ออกการ์ด
+          </span>
+          {isAdmin && (
+            <a
+              href="/dashboard/schedule"
+              className="ml-auto inline-flex items-center gap-1 text-sig-warn hover:underline"
+            >
+              ปรับช่วงเวลา <Icon name="external" size={11} />
+            </a>
+          )}
+        </div>
+      )}
 
       {/* Live prices ticker */}
       {monitoredSymbols.length > 0 && (

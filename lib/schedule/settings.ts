@@ -8,6 +8,12 @@ export interface BacktestScheduleConfig {
   // outcome (WIN_*, LOSS_SL, SKIP_*, NO_DATA, ERROR). 0 = never archive.
   // Rows stay in the database so analytics keep their full history.
   card_retention_days: number;
+  // AI active hours (Asia/Bangkok). Outside this window, BUY/SELL webhooks are
+  // accepted but the AI analysis step is skipped — no ai_signal_analysis row,
+  // no card, no Telegram. start === end means always on (24h). Wraps midnight
+  // when start > end (e.g., 22 → 6 covers 22:00-06:00).
+  ai_active_hours_start: number;  // 0..23
+  ai_active_hours_end: number;    // 0..23
   last_run_at: string | null;
   last_result: {
     evaluated: number;
@@ -25,9 +31,34 @@ const DEFAULT_CONFIG: BacktestScheduleConfig = {
   interval_minutes: 15,
   paused_reason: null,
   card_retention_days: 7,
+  ai_active_hours_start: 0,
+  ai_active_hours_end: 0, // 0/0 → always on (preserves prior behavior)
   last_run_at: null,
   last_result: null,
 };
+
+/**
+ * Returns true if the given Date (or now) falls within the configured AI
+ * active window in Asia/Bangkok time. start === end is treated as "always on"
+ * to keep the default behavior intuitive when admin has not configured this.
+ */
+export function isWithinAiHours(
+  start: number,
+  end: number,
+  at: Date = new Date()
+): boolean {
+  if (start === end) return true; // 24h
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: "Asia/Bangkok",
+    hour: "2-digit",
+    hour12: false,
+  }).formatToParts(at);
+  const h = Number(parts.find((p) => p.type === "hour")?.value);
+  if (!Number.isFinite(h)) return true; // fail open — never block on parse error
+  if (start < end) return h >= start && h < end;
+  // Wraps midnight (e.g., 22 → 6)
+  return h >= start || h < end;
+}
 
 const KEY = "backtest_schedule";
 

@@ -5,17 +5,33 @@ import {
   setEnabled,
   setIntervalMinutes,
   setCardRetentionDays,
+  setAiActiveHours,
   triggerRunNow,
 } from "./actions";
-import type { BacktestScheduleConfig } from "@/lib/schedule/settings";
+import { isWithinAiHours, type BacktestScheduleConfig } from "@/lib/schedule/settings";
 import Icon from "@/components/ui/Icon";
 
 export default function ScheduleControls({ config }: { config: BacktestScheduleConfig }) {
   const [pending, start] = useTransition();
   const [interval, setIntervalState] = useState(config.interval_minutes);
   const [retention, setRetention] = useState(config.card_retention_days);
+  const [aiStart, setAiStart] = useState(config.ai_active_hours_start);
+  const [aiEnd, setAiEnd] = useState(config.ai_active_hours_end);
   const [reason, setReason] = useState(config.paused_reason ?? "");
   const [msg, setMsg] = useState<string | null>(null);
+
+  const aiWindowChanged =
+    aiStart !== config.ai_active_hours_start || aiEnd !== config.ai_active_hours_end;
+  const aiWindowDescription =
+    aiStart === aiEnd
+      ? "ทำงาน 24 ชั่วโมง (ไม่จำกัดเวลา)"
+      : aiStart < aiEnd
+      ? `ทำงานช่วง ${String(aiStart).padStart(2, "0")}:00 – ${String(aiEnd).padStart(2, "0")}:00 BKK`
+      : `ทำงานช่วง ${String(aiStart).padStart(2, "0")}:00 – ${String(aiEnd).padStart(2, "0")}:00 BKK (ข้ามคืน)`;
+  const currentlyInWindow = isWithinAiHours(
+    config.ai_active_hours_start,
+    config.ai_active_hours_end
+  );
 
   const safeRun = (fn: () => Promise<unknown>) =>
     start(async () => {
@@ -132,6 +148,68 @@ export default function ScheduleControls({ config }: { config: BacktestScheduleC
           >
             Save
           </button>
+        </div>
+      </div>
+
+      {/* AI active hours */}
+      <div className="card p-5">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <div className="flex items-center gap-2">
+              <Icon name="robot" size={14} className="text-sig-violet" />
+              <span className="text-[14px] font-semibold text-ink-primary">
+                AI active hours
+              </span>
+              <span
+                className={`chip !text-[10px] ${
+                  currentlyInWindow ? "chip-buy" : "chip-warn"
+                }`}
+              >
+                <span
+                  className={`pulse-dot ${currentlyInWindow ? "" : "!bg-sig-warn"}`}
+                />
+                {currentlyInWindow ? "Active now" : "Idle now"}
+              </span>
+            </div>
+            <p className="mt-1 max-w-md text-[11px] text-ink-muted">
+              นอกช่วงเวลานี้ webhook BUY/SELL จะ <span className="text-ink-secondary">ไม่ถูกวิเคราะห์โดย AI</span> —
+              ไม่มี card, ไม่ส่ง Telegram, ประหยัด API cost.
+              {" "}NO_TRADE heartbeat ยังส่งตามปกติ. ตั้ง start == end (เช่น 0/0) = ทำงาน 24 ชม.
+            </p>
+            <p className="mt-2 text-[12px] text-ink-secondary">
+              ปัจจุบัน: <span className="font-mono text-ink-primary">{aiWindowDescription}</span>
+            </p>
+          </div>
+          <div className="flex items-center gap-2">
+            <select
+              value={aiStart}
+              onChange={(e) => setAiStart(Number(e.target.value))}
+              className="h-9 rounded-chip border border-white/5 bg-surface-2/60 px-2 font-mono text-[13px] text-ink-primary"
+              aria-label="AI active hour start"
+            >
+              {Array.from({ length: 24 }, (_, i) => (
+                <option key={i} value={i}>{String(i).padStart(2, "0")}:00</option>
+              ))}
+            </select>
+            <span className="text-[12px] text-ink-muted">→</span>
+            <select
+              value={aiEnd}
+              onChange={(e) => setAiEnd(Number(e.target.value))}
+              className="h-9 rounded-chip border border-white/5 bg-surface-2/60 px-2 font-mono text-[13px] text-ink-primary"
+              aria-label="AI active hour end"
+            >
+              {Array.from({ length: 24 }, (_, i) => (
+                <option key={i} value={i}>{String(i).padStart(2, "0")}:00</option>
+              ))}
+            </select>
+            <button
+              disabled={pending || !aiWindowChanged}
+              onClick={() => safeRun(() => setAiActiveHours(aiStart, aiEnd))}
+              className="btn btn-secondary disabled:opacity-50"
+            >
+              Save
+            </button>
+          </div>
         </div>
       </div>
 
