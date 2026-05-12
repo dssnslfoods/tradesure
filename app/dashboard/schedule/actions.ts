@@ -88,6 +88,18 @@ export async function setAiActiveDays(days: number[]) {
   revalidatePath("/dashboard");
 }
 
+export async function setAiModel(modelId: string) {
+  await requireAdminOrThrow();
+  // Defer validation to the catalog so we don't import server-only code into
+  // the action's caller bundle by accident.
+  const { findModel } = await import("@/lib/ai/models");
+  if (!findModel(modelId)) {
+    throw new Error(`Unknown AI model: ${modelId}`);
+  }
+  await updateScheduleConfig({ ai_model: modelId });
+  revalidatePath("/dashboard/schedule");
+}
+
 export async function processQueuedSignals() {
   await requireAdminOrThrow();
   const base =

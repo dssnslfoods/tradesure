@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSupabaseAdmin } from "@/lib/supabase/server";
 import { analyzeCryptoSignal } from "@/lib/ai/analyzeCryptoSignal";
+import { getScheduleConfig } from "@/lib/schedule/settings";
 import { isCurrentUserAdmin } from "@/lib/auth/guards";
 import {
   broadcastTelegramMessage,
@@ -89,6 +90,14 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: true, processed: 0, message: "queue is empty" });
   }
 
+  // Honor admin-selected model for the whole batch.
+  let modelId: string | undefined;
+  try {
+    modelId = (await getScheduleConfig()).ai_model;
+  } catch {
+    // Analyzer falls back to its own default if unset.
+  }
+
   let processed = 0;
   let filtered = 0;
   let telegrams = 0;
@@ -113,7 +122,7 @@ export async function POST(req: NextRequest) {
     let aiResult;
     let aiRaw: unknown = null;
     try {
-      const out = await analyzeCryptoSignal(payload);
+      const out = await analyzeCryptoSignal(payload, modelId);
       aiResult = out.result;
       aiRaw = out.raw;
     } catch (err) {

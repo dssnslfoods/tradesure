@@ -138,7 +138,15 @@ export async function POST(req: NextRequest) {
   let aiResult;
   let aiRaw: unknown = null;
   try {
-    const out = await analyzeCryptoSignal(payload);
+    // Look up admin-selected model. We deliberately re-fetch (instead of
+    // reusing cfg above) so the most recent setting is used per request.
+    let modelId: string | undefined;
+    try {
+      modelId = (await getScheduleConfig()).ai_model;
+    } catch {
+      // Fall through — analyzer will use its own default
+    }
+    const out = await analyzeCryptoSignal(payload, modelId);
     aiResult = out.result;
     aiRaw = out.raw;
   } catch (err) {

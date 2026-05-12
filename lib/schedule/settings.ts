@@ -19,6 +19,10 @@ export interface BacktestScheduleConfig {
   // Rows stay in the database so analytics keep their full history.
   card_retention_days: number;
 
+  // AI model selection — picked from lib/ai/models.ts catalog. Falls back to
+  // DEFAULT_AI_MODEL when empty. Provider is inferred from the model id.
+  ai_model: string;
+
   // ── AI active schedule (Phase 2: multi-window + day-of-week) ──────────
   // Outside this schedule, BUY/SELL webhooks are accepted but no AI analysis
   // runs. A row is still inserted into ai_signal_analysis with outcome="QUEUED"
@@ -57,6 +61,7 @@ const DEFAULT_CONFIG: BacktestScheduleConfig = {
   interval_minutes: 15,
   paused_reason: null,
   card_retention_days: 7,
+  ai_model: "gpt-4o-mini",   // catalog default — keep in sync with DEFAULT_AI_MODEL
   ai_active_windows: [],     // empty == always on
   ai_active_days: ALL_DAYS,  // all 7 days
   ai_active_hours_start: 0,

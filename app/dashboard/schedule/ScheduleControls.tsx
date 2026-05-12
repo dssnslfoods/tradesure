@@ -7,6 +7,7 @@ import {
   setCardRetentionDays,
   setAiActiveWindows,
   setAiActiveDays,
+  setAiModel,
   processQueuedSignals,
   triggerRunNow,
 } from "./actions";
@@ -15,6 +16,7 @@ import {
   type AiWindow,
   type BacktestScheduleConfig,
 } from "@/lib/schedule/settings";
+import { AI_MODELS, findModel, DEFAULT_AI_MODEL } from "@/lib/ai/models";
 import Icon from "@/components/ui/Icon";
 
 const DAY_LABELS = ["อา", "จ", "อ", "พ", "พฤ", "ศ", "ส"];
@@ -43,6 +45,7 @@ export default function ScheduleControls({
   const [pending, start] = useTransition();
   const [interval, setIntervalState] = useState(config.interval_minutes);
   const [retention, setRetention] = useState(config.card_retention_days);
+  const [model, setModel] = useState(config.ai_model || DEFAULT_AI_MODEL);
   const [windows, setWindows] = useState<AiWindow[]>(
     config.ai_active_windows.length > 0
       ? config.ai_active_windows
@@ -189,6 +192,80 @@ export default function ScheduleControls({
           >
             Save
           </button>
+        </div>
+      </div>
+
+      {/* AI model picker */}
+      <div className="card p-5">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div className="min-w-0 flex-1">
+            <div className="flex items-center gap-2">
+              <Icon name="robot" size={14} className="text-sig-violet" />
+              <span className="text-[14px] font-semibold text-ink-primary">
+                AI model
+              </span>
+              {(() => {
+                const m = findModel(model);
+                return m ? (
+                  <span
+                    className={`chip !text-[10px] ${
+                      m.provider === "gemini" ? "chip-info" : "chip-buy"
+                    }`}
+                  >
+                    {m.provider === "gemini" ? "Google" : "OpenAI"}
+                  </span>
+                ) : null;
+              })()}
+            </div>
+            <p className="mt-1 max-w-xl text-[11px] text-ink-muted">
+              เลือก AI provider + version ที่จะใช้วิเคราะห์ webhook. การเปลี่ยนมีผล{" "}
+              <span className="text-ink-secondary">ทันทีกับ signal ถัดไป</span>.
+              ต้องตั้ง env <code className="font-mono text-brand">OPENAI_API_KEY</code> หรือ{" "}
+              <code className="font-mono text-brand">GEMINI_API_KEY</code> ให้ตรงกับ provider ที่เลือก.
+            </p>
+            {(() => {
+              const m = findModel(model);
+              if (!m?.description) return null;
+              return (
+                <p className="mt-2 text-[12px] text-ink-secondary">
+                  รุ่นปัจจุบัน:{" "}
+                  <span className="font-mono text-ink-primary">{m.label}</span>{" "}
+                  — {m.description}
+                </p>
+              );
+            })()}
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <select
+              value={model}
+              onChange={(e) => setModel(e.target.value)}
+              className="h-9 min-w-[240px] rounded-chip border border-white/5 bg-surface-2/60 px-3 font-mono text-[13px] text-ink-primary"
+            >
+              <optgroup label="OpenAI (GPT)">
+                {AI_MODELS.filter((m) => m.provider === "openai").map((m) => (
+                  <option key={m.id} value={m.id}>
+                    {m.label}
+                    {m.recommended ? " ⭐" : ""}
+                  </option>
+                ))}
+              </optgroup>
+              <optgroup label="Google Gemini">
+                {AI_MODELS.filter((m) => m.provider === "gemini").map((m) => (
+                  <option key={m.id} value={m.id}>
+                    {m.label}
+                    {m.recommended ? " ⭐" : ""}
+                  </option>
+                ))}
+              </optgroup>
+            </select>
+            <button
+              disabled={pending || model === (config.ai_model || DEFAULT_AI_MODEL)}
+              onClick={() => safeRun(() => setAiModel(model))}
+              className="btn btn-secondary disabled:opacity-50"
+            >
+              Save model
+            </button>
+          </div>
         </div>
       </div>
 

@@ -1,5 +1,7 @@
 import OpenAI from "openai";
 import type { AIAnalysisResult, AIBias, RiskLevel, TradingViewPayload } from "@/types/signal";
+import { callGemini } from "./gemini";
+import { DEFAULT_AI_MODEL, providerFor } from "./models";
 
 const SYSTEM_PROMPT = `คุณคือผู้ช่วยวิเคราะห์สัญญาณการเทรด Bitcoin / Crypto
 - ตอบเป็นภาษาไทยเท่านั้น
@@ -140,31 +142,72 @@ function coerceNumeric(v: unknown): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
-export async function analyzeCryptoSignal(
-  payload: TradingViewPayload
-): Promise<{ result: AIAnalysisResult; raw: unknown }> {
+async function callOpenAi(
+  model: string,
+  systemPrompt: string,
+  userPrompt: string
+): Promise<string> {
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) throw new Error("Missing OPENAI_API_KEY");
 
   const client = new OpenAI({ apiKey });
 
+  // o1-* reasoning models reject the system role and response_format.
+  // Detect and fall back to a single user message with JSON instructions.
+  const isReasoningModel = /^o1|^o3/.test(model);
+
+  if (isReasoningModel) {
+    const completion = await client.chat.completions.create({
+      model,
+      messages: [
+        { role: "user", content: `${systemPrompt}\n\n${userPrompt}\n\nReturn JSON only.` },
+      ],
+    });
+    return completion.choices[0]?.message?.content ?? "{}";
+  }
+
   const completion = await client.chat.completions.create({
-    model: process.env.OPENAI_MODEL || "gpt-4o-mini",
-    // Lower temperature → more consistent confidence calibration across signals.
+    model,
     temperature: 0,
     response_format: { type: "json_object" },
     messages: [
-      { role: "system", content: SYSTEM_PROMPT },
-      { role: "user", content: buildUserPrompt(payload) },
+      { role: "system", content: systemPrompt },
+      { role: "user", content: userPrompt },
     ],
   });
+  return completion.choices[0]?.message?.content ?? "{}";
+}
 
-  const content = completion.choices[0]?.message?.content ?? "{}";
+export async function analyzeCryptoSignal(
+  payload: TradingViewPayload,
+  modelId?: string
+): Promise<{ result: AIAnalysisResult; raw: unknown; model: string; provider: string }> {
+  // Priority: explicit arg > env override > catalog default
+  const targetModel = modelId || process.env.OPENAI_MODEL || DEFAULT_AI_MODEL;
+  const provider = providerFor(targetModel);
+  const userPrompt = buildUserPrompt(payload);
+
+  let content: string;
+  if (provider === "gemini") {
+    content = await callGemini(targetModel, SYSTEM_PROMPT, userPrompt);
+  } else {
+    content = await callOpenAi(targetModel, SYSTEM_PROMPT, userPrompt);
+  }
+
   let parsed: Record<string, unknown> = {};
   try {
     parsed = JSON.parse(content);
   } catch {
-    throw new Error("AI returned non-JSON response");
+    // Some models wrap JSON in ```json ... ``` — strip and retry once
+    const stripped = content
+      .replace(/^```(?:json)?\s*/i, "")
+      .replace(/\s*```\s*$/, "")
+      .trim();
+    try {
+      parsed = JSON.parse(stripped);
+    } catch {
+      throw new Error(`AI (${provider}/${targetModel}) returned non-JSON response`);
+    }
   }
 
   const result: AIAnalysisResult = {
@@ -184,5 +227,5 @@ export async function analyzeCryptoSignal(
     reasoning_th: String(parsed.reasoning_th ?? "-"),
   };
 
-  return { result, raw: parsed };
+  return { result, raw: parsed, model: targetModel, provider };
 }
