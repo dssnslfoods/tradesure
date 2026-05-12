@@ -1,5 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSupabaseAdmin } from "@/lib/supabase/server";
+import {
+  broadcastTelegramMessage,
+  buildNoTradeMessage,
+} from "@/lib/telegram/sendTelegramMessage";
 import type { TradingViewPayload } from "@/types/signal";
 
 export const runtime = "nodejs";
@@ -42,6 +46,22 @@ export async function POST(req: NextRequest) {
   );
   if (missing.length) {
     return badRequest(`Missing required fields: ${missing.join(", ")}`);
+  }
+
+  // ─── NO_TRADE fast path ──────────────────────────────────────────────────
+  // Pine fires this every confirmed bar when neither LONG nor SHORT setup is
+  // valid. We skip AI + DB storage and just notify Telegram so users know the
+  // bot is alive and *why* it stayed flat. Suppression via NOTRADE_TELEGRAM=0.
+  if (String(payload.signal).toUpperCase() === "NO_TRADE") {
+    const noTradeOn = (process.env.NOTRADE_TELEGRAM ?? "1") !== "0";
+    if (noTradeOn) {
+      const msg = buildNoTradeMessage(payload);
+      // Fire-and-forget so we respond to TradingView in <3s
+      void broadcastTelegramMessage(msg).catch((err) => {
+        console.error("[webhook] no-trade Telegram send failed:", err);
+      });
+    }
+    return NextResponse.json({ ok: true, no_trade: true });
   }
 
   const supabase = getSupabaseAdmin();

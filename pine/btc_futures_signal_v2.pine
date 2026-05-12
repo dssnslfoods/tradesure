@@ -42,6 +42,7 @@ grpRun    = "Execution"
 useConfirmedBar = input.bool(true,  "Alert only after candle close", group=grpRun)
 enableLong      = input.bool(true,  "Enable LONG (BUY) alerts",  group=grpRun)
 enableShort     = input.bool(true,  "Enable SHORT (SELL) alerts", group=grpRun)
+enableNoTradeAlert = input.bool(true, "Send NO_TRADE update every candle close", group=grpRun, tooltip="Sends a heartbeat alert each hour explaining why the bot stayed flat. Disable to silence.")
 testAlert       = input.bool(false, "Send TEST alert every candle close", group=grpRun)
 
 grpHook   = "Webhook"
@@ -151,6 +152,34 @@ if longSignal
 
 if shortSignal
     alert(makePayload("SELL", shortEntryMid, shortEntryLow, shortEntryHigh, shortStop, shortTp1, shortTp2, shortRiskAbs, shortRiskPct), alert.freq_once_per_bar_close)
+
+// =====================================================
+// === NO_TRADE heartbeat — fires every confirmed bar when no entry valid
+// =====================================================
+// Inspect which filter(s) prevented a trade so the user sees *why*.
+hasAnySignal = longSignal or shortSignal
+ntNoCross    = not (rawLong or rawShort)
+ntWeakTrend  = (rawLong or rawShort) and not trendStrong
+ntLowVolume  = (rawLong or rawShort) and not volOk
+ntDeadMarket = (rawLong or rawShort) and not atrOk
+ntBlockHour  = useTimeFilter and isBlockedHour
+ntCooldown   = (rawLong or rawShort) and not canSignal
+ntRsiOut     = (rawLong and not (rsi >= rsiLongMin and rsi <= rsiLongMax)) or (rawShort and not (rsi <= rsiShortMax and rsi >= rsiShortMin))
+ntHtfMis     = useHtfFilter and ((rawLong and close <= htfEma) or (rawShort and close >= htfEma))
+
+boolStr(bool b) => b ? "true" : "false"
+
+makeNoTradePayload() =>
+    a = '{"secret":"' + secret + '","source":"' + botName + '","signal":"NO_TRADE"'
+    b = ',"symbol":"' + syminfo.ticker + '","exchange":"' + syminfo.prefix + '","interval":"' + timeframe.period + '","timeframe":"' + timeframe.period + '"'
+    c = ',"time":' + str.tostring(time) + ',"bar_time":' + str.tostring(time) + ',"price":' + fmt(close)
+    d = ',"reasons":{"no_cross":' + boolStr(ntNoCross) + ',"weak_trend":' + boolStr(ntWeakTrend) + ',"low_volume":' + boolStr(ntLowVolume) + ',"dead_market":' + boolStr(ntDeadMarket) + ',"blocked_hour":' + boolStr(ntBlockHour) + ',"cooldown":' + boolStr(ntCooldown) + ',"rsi_out":' + boolStr(ntRsiOut) + ',"htf_misalign":' + boolStr(ntHtfMis) + '}'
+    e = ',"rsi":' + fmt(rsi) + ',"adx":' + fmt(adx) + ',"atr":' + fmt(atr) + ',"atr_pct":' + fmt(atr / close * 100.0)
+    f = ',"volume":' + fmt(volume) + ',"volume_ma":' + fmt(volMa) + ',"hour_bkk":' + str.tostring(currentHourBkk) + '}'
+    a + b + c + d + e + f
+
+if enableNoTradeAlert and barstate.isconfirmed and not hasAnySignal
+    alert(makeNoTradePayload(), alert.freq_once_per_bar_close)
 
 if testAlert and barstate.isconfirmed
     testSl  = close - atr * atrStopMult

@@ -159,6 +159,95 @@ export function buildTelegramMessage(
   return lines.join("\n");
 }
 
+// ─── NO_TRADE message ──────────────────────────────────────────────────────
+// Sent every candle close when none of the trade conditions are met. Lets the
+// user know the bot is alive and *why* it is staying flat.
+interface NoTradePayload {
+  symbol?: string;
+  interval?: string;
+  price?: string | number;
+  time?: string | number;
+  hour_bkk?: string | number;
+  rsi?: string | number;
+  adx?: string | number;
+  atr_pct?: string | number;
+  volume?: string | number;
+  volume_ma?: string | number;
+  reasons?: {
+    no_cross?: boolean;
+    weak_trend?: boolean;
+    low_volume?: boolean;
+    dead_market?: boolean;
+    blocked_hour?: boolean;
+    cooldown?: boolean;
+    rsi_out?: boolean;
+    htf_misalign?: boolean;
+  };
+}
+
+const REASON_LABELS_TH: Record<keyof NonNullable<NoTradePayload["reasons"]>, string> = {
+  no_cross:     "ไม่มี EMA cross (รอ setup)",
+  weak_trend:   "ADX ต่ำ (เทรนด์อ่อน)",
+  low_volume:   "Volume ไม่พอ",
+  dead_market:  "ATR% ต่ำ (ตลาดเงียบ)",
+  blocked_hour: "ชั่วโมงที่ block (win rate ต่ำในอดีต)",
+  cooldown:     "อยู่ในช่วง cooldown หลัง signal ล่าสุด",
+  rsi_out:      "RSI อยู่นอกโซนเข้า",
+  htf_misalign: "Higher-TF trend ไม่สอดคล้อง",
+};
+
+function fmtBangkokTime(t: string | number | undefined): string {
+  if (t === undefined || t === null || t === "") return "-";
+  const ms = typeof t === "number" ? t : Number(t);
+  const d = Number.isFinite(ms) ? new Date(ms) : new Date(String(t));
+  if (Number.isNaN(d.getTime())) return "-";
+  return d.toLocaleString("th-TH", {
+    timeZone: "Asia/Bangkok",
+    hour: "2-digit",
+    minute: "2-digit",
+    day: "2-digit",
+    month: "short",
+    hour12: false,
+  });
+}
+
+export function buildNoTradeMessage(payload: NoTradePayload): string {
+  const reasons = payload.reasons ?? {};
+  const activeReasons = (Object.keys(REASON_LABELS_TH) as (keyof typeof REASON_LABELS_TH)[])
+    .filter((k) => reasons[k] === true)
+    .map((k) => `• ${REASON_LABELS_TH[k]}`);
+  // Fallback if Pine didn't flag anything specific
+  if (activeReasons.length === 0) activeReasons.push("• ไม่เข้าเงื่อนไขเทรด (รอ setup ที่ดีกว่า)");
+
+  const symbol = payload.symbol ?? "-";
+  const interval = payload.interval ? `${payload.interval}m` : "";
+  const priceStr = fmtPrice(payload.price);
+
+  const vol = Number(payload.volume);
+  const volMa = Number(payload.volume_ma);
+  const volRatio =
+    Number.isFinite(vol) && Number.isFinite(volMa) && volMa > 0
+      ? `${(vol / volMa).toFixed(2)}×`
+      : "-";
+
+  const adxStr = payload.adx !== undefined ? Number(payload.adx).toFixed(1) : "-";
+  const rsiStr = payload.rsi !== undefined ? Number(payload.rsi).toFixed(1) : "-";
+  const atrPctStr = payload.atr_pct !== undefined ? Number(payload.atr_pct).toFixed(2) : "-";
+
+  return [
+    `🟡 <b>NO TRADE</b> — ${escapeHtml(symbol)} ${escapeHtml(interval)}`,
+    `⏰ ${fmtBangkokTime(payload.time)} (BKK)`,
+    "",
+    "<b>ไม่เข้าเงื่อนไขเทรด:</b>",
+    activeReasons.map(escapeHtml).join("\n"),
+    "",
+    `📊 ราคา: $${priceStr}`,
+    `<code>ADX ${adxStr} · RSI ${rsiStr} · ATR ${atrPctStr}% · Vol ${volRatio}</code>`,
+    "",
+    "<i>(ข้อความนี้ส่งทุกชั่วโมงเพื่อยืนยันว่า bot ทำงานปกติ)</i>",
+  ].join("\n");
+}
+
 export async function sendTelegramToChat(
   chatId: string,
   message: string
