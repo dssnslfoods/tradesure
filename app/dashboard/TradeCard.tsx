@@ -59,6 +59,8 @@ function outcomeMeta(o: string | null): OutcomeMeta {
       return { chip: "chip-info", label: "Open" };
     case "PENDING":
       return { chip: "chip-mute", label: "Pending" };
+    case "QUEUED":
+      return { chip: "chip-info", label: "Queued" };
     case "SKIP_WAIT":
       return { chip: "chip-warn", label: "No Trade" };
     case "SKIP_LOW_CONF":

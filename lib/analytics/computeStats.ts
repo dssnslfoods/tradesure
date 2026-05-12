@@ -117,6 +117,7 @@ const SKIP_OUTCOMES = new Set([
   "SKIP_WAIT",
   "SKIP_LOW_CONF",
   "SKIP_HOUR",
+  "QUEUED",
   "NO_DATA",
   "ERROR",
 ]);

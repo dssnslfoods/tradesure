@@ -31,7 +31,7 @@ export interface SignalRow {
   tv_price: number | null;
 }
 
-type FilterKey = "all" | "open" | "wins" | "losses" | "skip";
+type FilterKey = "all" | "open" | "wins" | "losses" | "skip" | "queued";
 
 // All three SKIP_* outcomes mean "we didn't take this trade" — group under one filter.
 const isSkipped = (r: SignalRow) =>
@@ -42,6 +42,7 @@ const isSkipped = (r: SignalRow) =>
 const FILTERS: { key: FilterKey; label: string; match: (r: SignalRow) => boolean }[] = [
   { key: "all", label: "All", match: () => true },
   { key: "open", label: "Open", match: (r) => r.outcome === "OPEN" || r.outcome === "PENDING" },
+  { key: "queued", label: "Queued", match: (r) => r.outcome === "QUEUED" },
   { key: "wins", label: "Wins", match: (r) => r.outcome === "WIN_TP1" || r.outcome === "WIN_TP2" },
   { key: "losses", label: "Losses", match: (r) => r.outcome === "LOSS_SL" },
   { key: "skip", label: "No Trade", match: isSkipped },
@@ -79,6 +80,7 @@ export default function SignalsTable({
   const counts: Record<FilterKey, number> = {
     all: rows.length,
     open: rows.filter((r) => r.outcome === "OPEN" || r.outcome === "PENDING").length,
+    queued: rows.filter((r) => r.outcome === "QUEUED").length,
     wins: rows.filter((r) => r.outcome === "WIN_TP1" || r.outcome === "WIN_TP2").length,
     losses: rows.filter((r) => r.outcome === "LOSS_SL").length,
     skip: rows.filter(isSkipped).length,

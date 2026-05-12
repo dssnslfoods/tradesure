@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { cookies } from "next/headers";
 import { updateScheduleConfig } from "@/lib/schedule/settings";
 import { isCurrentUserAdmin } from "@/lib/auth/guards";
 
@@ -51,6 +52,64 @@ export async function setAiActiveHours(start: number, end: number) {
   });
   revalidatePath("/dashboard/schedule");
   revalidatePath("/dashboard");
+}
+
+export async function setAiActiveWindows(
+  windows: { start: number; end: number }[]
+) {
+  await requireAdminOrThrow();
+  const ok = (n: number) => Number.isFinite(n) && n >= 0 && n <= 23 && Number.isInteger(n);
+  for (const w of windows) {
+    if (!ok(w.start) || !ok(w.end)) {
+      throw new Error("each window's start/end must be integer 0-23");
+    }
+  }
+  // Cap to a sane number of windows.
+  if (windows.length > 8) {
+    throw new Error("max 8 active windows");
+  }
+  await updateScheduleConfig({
+    ai_active_windows: windows,
+    // Mirror first window into legacy fields so old clients still see something useful
+    ai_active_hours_start: windows[0]?.start ?? 0,
+    ai_active_hours_end: windows[0]?.end ?? 0,
+  });
+  revalidatePath("/dashboard/schedule");
+  revalidatePath("/dashboard");
+}
+
+export async function setAiActiveDays(days: number[]) {
+  await requireAdminOrThrow();
+  const clean = Array.from(new Set(days))
+    .filter((d) => Number.isInteger(d) && d >= 0 && d <= 6)
+    .sort((a, b) => a - b);
+  await updateScheduleConfig({ ai_active_days: clean });
+  revalidatePath("/dashboard/schedule");
+  revalidatePath("/dashboard");
+}
+
+export async function processQueuedSignals() {
+  await requireAdminOrThrow();
+  const base =
+    process.env.NEXT_PUBLIC_SITE_URL ??
+    process.env.URL ??
+    "http://localhost:3000";
+
+  // The endpoint itself enforces admin auth via cookie — forward the request
+  // through the same Next.js process so we keep the cookie.
+  const cookieHeader = cookies()
+    .getAll()
+    .map((c) => `${c.name}=${c.value}`)
+    .join("; ");
+  const res = await fetch(`${base}/api/admin/process-queued?limit=50`, {
+    method: "POST",
+    cache: "no-store",
+    headers: { cookie: cookieHeader },
+  });
+  const data: unknown = await res.json().catch(() => ({}));
+  revalidatePath("/dashboard");
+  revalidatePath("/dashboard/schedule");
+  return data;
 }
 
 export async function triggerRunNow() {

@@ -36,6 +36,7 @@ export interface AIAnalysisResult {
 
 export type Outcome =
   | "PENDING"
+  | "QUEUED"        // gated by AI active hours/days — awaiting batch processing by admin
   | "SKIP_WAIT"
   | "SKIP_LOW_CONF" // AI confidence below threshold — not sent to Telegram, not backtested
   | "SKIP_HOUR"     // signal arrived during a blocked low win-rate hour

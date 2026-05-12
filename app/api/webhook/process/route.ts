@@ -7,7 +7,7 @@ import {
 } from "@/lib/telegram/sendTelegramMessage";
 import {
   getScheduleConfig,
-  isWithinAiHours,
+  isWithinAiSchedule,
 } from "@/lib/schedule/settings";
 import type { TradingViewPayload } from "@/types/signal";
 
@@ -76,29 +76,63 @@ export async function POST(req: NextRequest) {
   const payload = body.payload;
   const supabase = getSupabaseAdmin();
 
-  // ─── AI active-hours gate ────────────────────────────────────────────────
-  // Skip the AI analysis step (and downstream card/Telegram) when admin has
-  // restricted AI to specific hours. The raw `tradingview_signals` row was
-  // already saved by /api/webhook/tradingview — we just don't create the
-  // ai_signal_analysis row, so no card appears on the dashboard and no
-  // Telegram is sent. Settings live in `app_settings.backtest_schedule`.
+  // ─── AI active-schedule gate (Phase 2: multi-window + day-of-week) ─────
+  // Outside the configured schedule we insert a placeholder ai_signal_analysis
+  // row with outcome="QUEUED" — admin can review the queue in the dashboard
+  // and later run /api/admin/process-queued to batch-analyze with AI.
   try {
     const cfg = await getScheduleConfig();
-    if (!isWithinAiHours(cfg.ai_active_hours_start, cfg.ai_active_hours_end)) {
+    if (!isWithinAiSchedule(cfg.ai_active_windows, cfg.ai_active_days)) {
+      const sig = String(payload.signal ?? "").toUpperCase();
+      const fallbackBias: "LONG" | "SHORT" | null =
+        sig === "BUY" || sig === "LONG"
+          ? "LONG"
+          : sig === "SELL" || sig === "SHORT"
+          ? "SHORT"
+          : null;
+
+      const { data: queuedRow, error: queuedErr } = await supabase
+        .from("ai_signal_analysis")
+        .insert({
+          signal_id: signalId,
+          symbol: payload.symbol,
+          interval: payload.interval,
+          bias: fallbackBias,
+          confidence: null,
+          entry_zone: null,
+          entry_low: null,
+          entry_high: null,
+          stop_loss: null,
+          stop_loss_num: null,
+          take_profit_1: null,
+          take_profit_1_num: null,
+          take_profit_2: null,
+          take_profit_2_num: null,
+          risk_level: null,
+          summary_th: "อยู่นอกช่วง AI active hours — รอ admin trigger batch analysis",
+          reasoning_th: "[QUEUED] webhook นี้ถูกบันทึกในขณะที่ AI อยู่นอกช่วงเวลาทำงาน admin สามารถสั่งวิเคราะห์ภายหลังได้",
+          telegram_sent: false,
+          ai_raw_response: null,
+          outcome: "QUEUED",
+        })
+        .select("id")
+        .single();
+
       return NextResponse.json({
         ok: true,
         signal_id: signalId,
+        analysis_id: queuedRow?.id ?? null,
         gated: true,
-        reason: "outside_ai_active_hours",
-        ai_active_hours: {
-          start: cfg.ai_active_hours_start,
-          end: cfg.ai_active_hours_end,
-        },
+        outcome: "QUEUED",
+        reason: "outside_ai_schedule",
+        active_windows: cfg.ai_active_windows,
+        active_days: cfg.ai_active_days,
+        queue_insert_error: queuedErr?.message ?? undefined,
       });
     }
   } catch (err) {
     // Settings unavailable — fail open so signals are still analyzed
-    console.error("[webhook/process] ai-hours check failed, defaulting to ON:", err);
+    console.error("[webhook/process] ai-schedule check failed, defaulting to ON:", err);
   }
 
   let aiResult;

@@ -1,5 +1,15 @@
 import { getSupabaseAdmin } from "@/lib/supabase/server";
 
+/**
+ * A single AI active-hours window. Both bounds are integer hours 0..23 in
+ * Asia/Bangkok time. start === end means "24h" (the whole day). start > end
+ * wraps midnight (e.g., 22 → 6 covers 22:00-06:00 the next day).
+ */
+export interface AiWindow {
+  start: number;
+  end: number;
+}
+
 export interface BacktestScheduleConfig {
   enabled: boolean;
   interval_minutes: number;
@@ -8,12 +18,26 @@ export interface BacktestScheduleConfig {
   // outcome (WIN_*, LOSS_SL, SKIP_*, NO_DATA, ERROR). 0 = never archive.
   // Rows stay in the database so analytics keep their full history.
   card_retention_days: number;
-  // AI active hours (Asia/Bangkok). Outside this window, BUY/SELL webhooks are
-  // accepted but the AI analysis step is skipped — no ai_signal_analysis row,
-  // no card, no Telegram. start === end means always on (24h). Wraps midnight
-  // when start > end (e.g., 22 → 6 covers 22:00-06:00).
-  ai_active_hours_start: number;  // 0..23
-  ai_active_hours_end: number;    // 0..23
+
+  // ── AI active schedule (Phase 2: multi-window + day-of-week) ──────────
+  // Outside this schedule, BUY/SELL webhooks are accepted but no AI analysis
+  // runs. A row is still inserted into ai_signal_analysis with outcome="QUEUED"
+  // so admin can later batch-process them via /api/admin/process-queued.
+  //
+  // - ai_active_windows: list of {start, end} ranges. Empty list OR a single
+  //   window with start===end (e.g., 0/0) means "always on, 24h".
+  // - ai_active_days: list of weekdays where AI runs. 0=Sun, 6=Sat. Empty
+  //   list means "no days" (always gated). Defaults to all 7 days.
+  ai_active_windows: AiWindow[];
+  ai_active_days: number[];
+
+  // ── Legacy single-window fields (kept for backwards compat) ────────────
+  // Newer code reads ai_active_windows; these survive only so old JSON in
+  // app_settings keeps loading. Setters always write the new fields and clear
+  // these to 0/0.
+  ai_active_hours_start: number;
+  ai_active_hours_end: number;
+
   last_run_at: string | null;
   last_result: {
     evaluated: number;
@@ -26,38 +50,103 @@ export interface BacktestScheduleConfig {
   } | null;
 }
 
+const ALL_DAYS = [0, 1, 2, 3, 4, 5, 6];
+
 const DEFAULT_CONFIG: BacktestScheduleConfig = {
   enabled: true,
   interval_minutes: 15,
   paused_reason: null,
   card_retention_days: 7,
+  ai_active_windows: [],     // empty == always on
+  ai_active_days: ALL_DAYS,  // all 7 days
   ai_active_hours_start: 0,
-  ai_active_hours_end: 0, // 0/0 → always on (preserves prior behavior)
+  ai_active_hours_end: 0,
   last_run_at: null,
   last_result: null,
 };
 
-/**
- * Returns true if the given Date (or now) falls within the configured AI
- * active window in Asia/Bangkok time. start === end is treated as "always on"
- * to keep the default behavior intuitive when admin has not configured this.
- */
-export function isWithinAiHours(
-  start: number,
-  end: number,
-  at: Date = new Date()
-): boolean {
-  if (start === end) return true; // 24h
+/** Hour 0..23 in Asia/Bangkok for the given Date. */
+function bangkokHour(at: Date): number | null {
   const parts = new Intl.DateTimeFormat("en-US", {
     timeZone: "Asia/Bangkok",
     hour: "2-digit",
     hour12: false,
   }).formatToParts(at);
   const h = Number(parts.find((p) => p.type === "hour")?.value);
-  if (!Number.isFinite(h)) return true; // fail open — never block on parse error
-  if (start < end) return h >= start && h < end;
-  // Wraps midnight (e.g., 22 → 6)
-  return h >= start || h < end;
+  return Number.isFinite(h) ? h : null;
+}
+
+/** Weekday 0..6 (Sun..Sat) in Asia/Bangkok for the given Date. */
+function bangkokWeekday(at: Date): number | null {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: "Asia/Bangkok",
+    weekday: "short",
+  }).formatToParts(at);
+  const w = parts.find((p) => p.type === "weekday")?.value;
+  const map: Record<string, number> = { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 };
+  return w !== undefined && w in map ? map[w] : null;
+}
+
+function isHourInWindow(h: number, w: AiWindow): boolean {
+  if (w.start === w.end) return true; // 24h sentinel
+  if (w.start < w.end) return h >= w.start && h < w.end;
+  return h >= w.start || h < w.end; // wraps midnight
+}
+
+/**
+ * Returns true if the given Date (or now) is within ALL active-AI gates:
+ *   - weekday in ai_active_days
+ *   - hour matches at least one window in ai_active_windows
+ *     (empty list is treated as "always on")
+ */
+export function isWithinAiSchedule(
+  windows: AiWindow[],
+  days: number[],
+  at: Date = new Date()
+): boolean {
+  const h = bangkokHour(at);
+  const d = bangkokWeekday(at);
+  // Fail open on parse errors — we'd rather analyze a stray signal than block valid ones.
+  if (h === null || d === null) return true;
+
+  // Day gate
+  if (days.length > 0 && !days.includes(d)) return false;
+
+  // Hour gate: empty list = always on
+  if (windows.length === 0) return true;
+  return windows.some((w) => isHourInWindow(h, w));
+}
+
+/**
+ * Backwards-compatible helper. Reads old single-window fields if windows
+ * is empty AND old start/end are non-zero — useful while we migrate.
+ */
+export function isWithinAiHours(
+  start: number,
+  end: number,
+  at: Date = new Date()
+): boolean {
+  const h = bangkokHour(at);
+  if (h === null) return true;
+  return isHourInWindow(h, { start, end });
+}
+
+/** Migrate legacy single-window config into the new array shape on read. */
+function normalizeConfig(cfg: BacktestScheduleConfig): BacktestScheduleConfig {
+  const out = { ...cfg };
+  if (!Array.isArray(out.ai_active_windows)) out.ai_active_windows = [];
+  if (!Array.isArray(out.ai_active_days)) out.ai_active_days = ALL_DAYS;
+
+  // If the new array is empty but the old single fields define a window, migrate.
+  if (
+    out.ai_active_windows.length === 0 &&
+    !(out.ai_active_hours_start === 0 && out.ai_active_hours_end === 0)
+  ) {
+    out.ai_active_windows = [
+      { start: out.ai_active_hours_start, end: out.ai_active_hours_end },
+    ];
+  }
+  return out;
 }
 
 const KEY = "backtest_schedule";
@@ -74,7 +163,10 @@ export async function getScheduleConfig(): Promise<BacktestScheduleConfig> {
     await supabase.from("app_settings").insert({ key: KEY, value: DEFAULT_CONFIG });
     return DEFAULT_CONFIG;
   }
-  return { ...DEFAULT_CONFIG, ...(data.value as Partial<BacktestScheduleConfig>) };
+  return normalizeConfig({
+    ...DEFAULT_CONFIG,
+    ...(data.value as Partial<BacktestScheduleConfig>),
+  });
 }
 
 export async function updateScheduleConfig(

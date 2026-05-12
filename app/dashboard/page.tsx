@@ -1,6 +1,10 @@
 import { getSupabaseAdmin } from "@/lib/supabase/server";
 import { getCurrentUser } from "@/lib/auth/guards";
-import { getScheduleConfig, isWithinAiHours } from "@/lib/schedule/settings";
+import {
+  getScheduleConfig,
+  isWithinAiSchedule,
+  type AiWindow,
+} from "@/lib/schedule/settings";
 import SignalsTable, { type SignalRow } from "./SignalsTable";
 import BacktestButton from "./BacktestButton";
 import StatTile from "@/components/ui/StatTile";
@@ -11,7 +15,8 @@ export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
 // Outcomes that mean "this card is done evolving" — eligible for auto-archive.
-// OPEN and PENDING stay visible because they still need backtest evaluation.
+// OPEN, PENDING, QUEUED stay visible because they still need action (backtest
+// evaluation or admin batch processing).
 const ARCHIVABLE_OUTCOMES = new Set([
   "WIN_TP1",
   "WIN_TP2",
@@ -99,6 +104,7 @@ function computeStats(rows: Row[]): Stats {
       case "SKIP_WAIT":
       case "SKIP_LOW_CONF":
       case "SKIP_HOUR":
+      case "QUEUED":
       case "NO_DATA":
       case "ERROR":
         s.skipped++;
@@ -121,17 +127,30 @@ export default async function DashboardPage() {
   // *display-filter* only — the rows stay in Supabase so analytics keep their
   // full history. 0 days disables archiving entirely.
   let retentionDays = 7;
-  let aiStart = 0;
-  let aiEnd = 0;
+  let aiWindows: AiWindow[] = [];
+  let aiDays: number[] = [0, 1, 2, 3, 4, 5, 6];
   try {
     const cfg = await getScheduleConfig();
     retentionDays = cfg.card_retention_days ?? 7;
-    aiStart = cfg.ai_active_hours_start ?? 0;
-    aiEnd = cfg.ai_active_hours_end ?? 0;
+    aiWindows = cfg.ai_active_windows;
+    aiDays = cfg.ai_active_days;
   } catch {
     // Settings unavailable — fall through with defaults
   }
-  const aiActive = isWithinAiHours(aiStart, aiEnd);
+  const aiActive = isWithinAiSchedule(aiWindows, aiDays);
+  const aiSummary =
+    aiWindows.length === 0
+      ? "24h"
+      : aiWindows
+          .map(
+            (w) =>
+              `${String(w.start).padStart(2, "0")}:00 → ${String(w.end).padStart(2, "0")}:00`
+          )
+          .join(" + ");
+  const aiDaysSummary =
+    aiDays.length === 7
+      ? "ทุกวัน"
+      : aiDays.map((d) => ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"][d]).join(", ");
   const cutoffMs =
     retentionDays > 0 ? Date.now() - retentionDays * 24 * 60 * 60 * 1000 : 0;
   const rows =
@@ -187,17 +206,15 @@ export default async function DashboardPage() {
         )}
       </div>
 
-      {/* AI off-hours banner — only when admin has configured a window AND we're outside */}
+      {/* AI off-schedule banner — only when admin has configured a window AND we're outside */}
       {!aiActive && (
         <div className="mb-5 flex flex-wrap items-center gap-2 rounded-chip border border-sig-warn/30 bg-sig-warn/10 px-4 py-3 text-[12px]">
           <Icon name="clock" size={14} className="text-sig-warn" />
-          <span className="font-semibold text-sig-warn">AI วิเคราะห์อยู่นอกช่วงเวลาทำงาน</span>
+          <span className="font-semibold text-sig-warn">AI อยู่นอกช่วงเวลาทำงาน</span>
           <span className="text-ink-secondary">
-            ช่วงทำงาน:{" "}
-            <span className="font-mono text-ink-primary">
-              {String(aiStart).padStart(2, "0")}:00 → {String(aiEnd).padStart(2, "0")}:00 BKK
-            </span>{" "}
-            · webhook ที่เข้ามาในขณะนี้จะถูกบันทึกแต่ไม่ออกการ์ด
+            ช่วง:{" "}
+            <span className="font-mono text-ink-primary">{aiSummary} BKK · {aiDaysSummary}</span>{" "}
+            · webhook BUY/SELL จะถูกเก็บเป็น Queue รอ admin วิเคราะห์
           </span>
           {isAdmin && (
             <a

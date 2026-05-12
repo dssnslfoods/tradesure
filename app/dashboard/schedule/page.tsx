@@ -1,9 +1,24 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { getScheduleConfig, listRecentRuns } from "@/lib/schedule/settings";
+import { getSupabaseAdmin } from "@/lib/supabase/server";
 import { getCurrentUser } from "@/lib/auth/guards";
 import ScheduleControls from "./ScheduleControls";
 import Icon, { type IconName } from "@/components/ui/Icon";
+
+async function countQueuedSignals(): Promise<number> {
+  try {
+    const supabase = getSupabaseAdmin();
+    const { count, error } = await supabase
+      .from("ai_signal_analysis")
+      .select("id", { count: "exact", head: true })
+      .eq("outcome", "QUEUED");
+    if (error) return 0;
+    return count ?? 0;
+  } catch {
+    return 0;
+  }
+}
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -42,6 +57,7 @@ export default async function SchedulePage() {
 
   const config = await getScheduleConfig();
   const runs = await listRecentRuns(20);
+  const queuedCount = await countQueuedSignals();
 
   const totalEvaluated = runs.reduce((a, r) => a + r.evaluated, 0);
   const cronRuns = runs.filter((r) => r.triggered_by === "cron").length;
@@ -89,7 +105,7 @@ export default async function SchedulePage() {
         />
       </section>
 
-      <ScheduleControls config={config} />
+      <ScheduleControls config={config} queuedCount={queuedCount} />
 
       <section className="mt-7">
         <div className="mb-3 flex items-center gap-2">
