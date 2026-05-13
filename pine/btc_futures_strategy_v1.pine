@@ -1,29 +1,42 @@
 //@version=6
 // =====================================================
-// BTC Futures Strategy v1.1 — Backtest mirror of indicator v2
+// BTC Futures Strategy v1.2 — Phase 2 (regime filter + wider R:R)
 //
-// v1.1 (May 13, 2026): Fixed broken exit logic from v1. The original code
-// used `strategy.exit()` with `qty_percent=50 + limit + stop` simultaneously
-// which left positions stuck open on long backtests (0 closed trades over
-// 16 months in May 2026 test). v1.1 replaces it with explicit price checks
-// + `strategy.close()` calls — bullet-proof, no state ambiguity.
+// v1.2 (May 13, 2026): Built on top of v1.1's bullet-proof exit logic,
+// this version adds three regime detectors that prevent the strategy from
+// firing in unfavorable market conditions, plus widens the take-profit
+// distance to flip the win/loss size ratio in our favor.
 //
-// Same entry logic as `btc_futures_signal_v2.pine` (EMA cross + RSI + ADX +
-// volume + ATR% + HTF + time filter + cooldown) so backtest reflects live.
+// What v1.1 showed (Jan 2025–May 2026 backtest, BTCUSDT 1H):
+//   - 69 trades, win rate 30%, PF 0.539  →  losing money
+//   - The system worked Jan–Jul 2025, then bled steadily as BTC trended down
+//   - Avg win 1.48% vs Avg loss 0.98% → ratio 1.51 (decent)
+//   - But 30% win rate < 39.8% breakeven → still negative expectancy
 //
-// Two TP exit modes:
-//   1) "TP1 only"  — close full position at TP1 or SL (conservative)
-//   2) "TP1→TP2"   — close 50% at TP1, move SL to break-even, runner to TP2
-//                    (matches the live system's Option-A backtest model)
+// What v1.2 adds:
+//   1. Daily trend filter — LONG only when price > daily EMA200,
+//      SHORT only when below. Eliminates counter-trend whipsaws.
+//   2. Bollinger Band squeeze detector — refuse to trade when BB width
+//      is below a threshold (ranging market). Avoids chop.
+//   3. ATR expansion filter — only enter when current ATR exceeds the
+//      50-bar SMA of ATR. Confirms volatility is breaking out of a lull.
+//   4. Wider R:R — SL × 2.5 ATR (was 1.8), TP1 1.5R (was 1.0), TP2 3R
+//      (was 2.0). Larger SL reduces noise stop-outs; larger TP improves
+//      the ratio.
+//   5. Higher default ADX (17 → 22) — only trade in clearly trending
+//      moves, not weak ADX < 20 chop.
 //
-// IMPORTANT: This file is for backtesting / visual analysis only. The live
-// production webhook still runs from btc_futures_signal_v2.pine.
+// Each filter is individually toggleable so you can A/B test their
+// contribution. Use the info table top-right to see live regime state.
+//
+// Live production still uses btc_futures_signal_v2.pine (indicator) for
+// the webhook. This file is purely for backtest validation.
 // =====================================================
-strategy("BTC Futures Strategy v1.1 (backtest)",
+strategy("BTC Futures Strategy v1.2 (backtest)",
      overlay=true,
      initial_capital=10000,
      default_qty_type=strategy.percent_of_equity,
-     default_qty_value=100,
+     default_qty_value=25,             // 25% of equity per trade — realistic risk
      commission_type=strategy.commission.percent,
      commission_value=0.04,            // 0.04% per side ≈ Binance Futures taker
      slippage=2,                       // 2 ticks slippage
@@ -34,7 +47,7 @@ strategy("BTC Futures Strategy v1.1 (backtest)",
      max_bars_back=2000)
 
 // =====================================================
-// === Inputs — keep IDENTICAL to indicator v2 so backtest reflects live
+// === Inputs
 // =====================================================
 grpCore   = "Core EMAs / RSI / ATR"
 fastEmaLength  = input.int(21,  "Fast EMA",  minval=1, group=grpCore)
@@ -47,10 +60,10 @@ rsiShortMax    = input.float(48.0, "RSI max for SHORT", minval=0, maxval=100, gr
 rsiShortMin    = input.float(25.0, "RSI min for SHORT (avoid oversold)",  minval=0, maxval=100, group=grpCore)
 atrLength      = input.int(14,  "ATR Length", minval=1, group=grpCore)
 
-grpRisk   = "Risk Management"
-atrStopMult    = input.float(1.8, "Stop-loss ATR multiplier", minval=0.1, step=0.1, group=grpRisk)
-tp1Mult        = input.float(1.0, "TP1 reward (R multiple)",  minval=0.1, step=0.1, group=grpRisk)
-tp2Mult        = input.float(2.0, "TP2 reward (R multiple)",  minval=0.1, step=0.1, group=grpRisk)
+grpRisk   = "Risk Management (v1.2 wider R:R)"
+atrStopMult    = input.float(2.5, "Stop-loss ATR multiplier (v1.2: 2.5)", minval=0.1, step=0.1, group=grpRisk)
+tp1Mult        = input.float(1.5, "TP1 reward (R multiple) (v1.2: 1.5)",  minval=0.1, step=0.1, group=grpRisk)
+tp2Mult        = input.float(3.0, "TP2 reward (R multiple) (v1.2: 3.0)",  minval=0.1, step=0.1, group=grpRisk)
 exitMode       = input.string("TP1→TP2 (50% partial + runner, SL→BE)",
      "Exit mode",
      options=["TP1 only (full close)", "TP1→TP2 (50% partial + runner, SL→BE)"],
@@ -58,7 +71,7 @@ exitMode       = input.string("TP1→TP2 (50% partial + runner, SL→BE)",
 
 grpFilter = "Quality Filters"
 adxLength      = input.int(14,   "ADX length", minval=1, group=grpFilter)
-adxMin         = input.float(17.0, "ADX minimum (trend strength)", minval=0, group=grpFilter)
+adxMin         = input.float(22.0, "ADX minimum (v1.2: 22)", minval=0, group=grpFilter)
 trendSlopeBars = input.int(10,   "Trend EMA slope lookback bars",  minval=1, group=grpFilter)
 volMaLength    = input.int(20,   "Volume MA length", minval=1, group=grpFilter)
 volMult        = input.float(1.0, "Volume must exceed MA × this",  minval=0.0, step=0.1, group=grpFilter)
@@ -66,11 +79,21 @@ atrPctMin      = input.float(0.25, "Minimum ATR % of price (kills dead market)",
 useHtfFilter   = input.bool(false, "Require 4H EMA50 trend alignment", group=grpFilter)
 htfTimeframe   = input.string("240", "Higher timeframe", options=["120","240","360","720","D"], group=grpFilter)
 htfEmaLen      = input.int(50,   "HTF EMA length", minval=1, group=grpFilter)
-cooldownBars   = input.int(3,    "Cooldown bars after a signal", minval=0, group=grpFilter)
+cooldownBars   = input.int(8,    "Cooldown bars after a signal (v1.2: 8)", minval=0, group=grpFilter)
 
-// Time-of-day gate (same as v2)
 useTimeFilter  = input.bool(true,  "Block low win-rate hours (Asia/Bangkok)", group=grpFilter)
 blockHours     = input.string("13,14,16,17,20", "Blocked hours (comma list, 0-23 BKK)", group=grpFilter)
+
+// ── NEW in v1.2: Regime filters ─────────────────────────────────────
+grpRegime = "Regime Filters (v1.2)"
+useDailyTrend       = input.bool(true,  "Require Daily EMA200 alignment", tooltip="LONG only when price > daily EMA200, SHORT only when below. Eliminates counter-trend trades.", group=grpRegime)
+dailyEmaLength      = input.int(200, "Daily EMA length", minval=10, group=grpRegime)
+useBBSqueeze        = input.bool(true,  "Reject trades when BB squeezing", tooltip="BB width must exceed threshold — avoids ranging/dead markets.", group=grpRegime)
+bbLength            = input.int(20, "Bollinger Band length", minval=2, group=grpRegime)
+bbWidthMin          = input.float(0.030, "Min BB width (% of mid)", minval=0.001, step=0.005, tooltip="0.03 = 3% — below this we assume ranging market", group=grpRegime)
+useAtrExpansion     = input.bool(true,  "Require ATR expansion", tooltip="Current ATR must exceed its 50-bar SMA — confirms volatility breakout.", group=grpRegime)
+atrExpansionMaLen   = input.int(50, "ATR SMA lookback", minval=10, group=grpRegime)
+atrExpansionMult    = input.float(1.0, "ATR > SMA × this", minval=0.5, step=0.05, group=grpRegime)
 
 grpRun = "Execution"
 enableLong  = input.bool(true,  "Enable LONG (BUY) trades",  group=grpRun)
@@ -96,6 +119,22 @@ volMa = ta.sma(volume, volMaLength)
 
 htfEma = request.security(syminfo.tickerid, htfTimeframe, ta.ema(close, htfEmaLen), lookahead=barmerge.lookahead_off)
 
+// ── NEW v1.2: regime detectors ──────────────────────────────────────
+// Daily trend bias — no future leak (confirmed daily close only)
+dailyEma = request.security(syminfo.tickerid, "D", ta.ema(close, dailyEmaLength), lookahead=barmerge.lookahead_off)
+dailyTrendUp   = not na(dailyEma) and close > dailyEma
+dailyTrendDown = not na(dailyEma) and close < dailyEma
+
+// Bollinger Band width — measures realized volatility
+bbBasis = ta.sma(close, bbLength)
+bbDev   = ta.stdev(close, bbLength)
+bbWidth = bbBasis > 0 ? (bbDev * 4.0) / bbBasis : 0.0   // (upper-lower)/basis
+notSqueezed = bbWidth > bbWidthMin
+
+// ATR expansion — current vs trailing average ATR
+atrSma = ta.sma(atr, atrExpansionMaLen)
+atrExpanding = atrSma > 0 and atr > atrSma * atrExpansionMult
+
 // =====================================================
 // === Filters
 // =====================================================
@@ -106,6 +145,12 @@ volOk       = volume > volMa * volMult
 atrOk       = (atr / close * 100.0) >= atrPctMin
 htfUp       = not useHtfFilter or close > htfEma
 htfDown     = not useHtfFilter or close < htfEma
+
+// Regime gates — each toggleable
+regimeLongOk  = not useDailyTrend  or dailyTrendUp
+regimeShortOk = not useDailyTrend  or dailyTrendDown
+bbOk          = not useBBSqueeze   or notSqueezed
+atrExpOk      = not useAtrExpansion or atrExpanding
 
 currentHourBkk = hour(time, "Asia/Bangkok")
 isBlockedHour = str.contains("," + blockHours + ",", "," + str.tostring(currentHourBkk) + ",")
@@ -123,11 +168,11 @@ canSignal = na(lastSignalBar) or (bar_index - lastSignalBar) >= cooldownBars
 rawLong  = ta.crossover(fastEma, slowEma)  and close > trendEma and rsi >= rsiLongMin  and rsi <= rsiLongMax
 rawShort = ta.crossunder(fastEma, slowEma) and close < trendEma and rsi <= rsiShortMax and rsi >= rsiShortMin
 
-longSignal  = enableLong  and barReady and rawLong  and trendUp   and trendStrong and volOk and atrOk and htfUp   and canSignal and timeOk and inDateWindow
-shortSignal = enableShort and barReady and rawShort and trendDown and trendStrong and volOk and atrOk and htfDown and canSignal and timeOk and inDateWindow
+longSignal  = enableLong  and barReady and rawLong  and trendUp   and trendStrong and volOk and atrOk and htfUp   and canSignal and timeOk and inDateWindow and regimeLongOk  and bbOk and atrExpOk
+shortSignal = enableShort and barReady and rawShort and trendDown and trendStrong and volOk and atrOk and htfDown and canSignal and timeOk and inDateWindow and regimeShortOk and bbOk and atrExpOk
 
 // =====================================================
-// === Trade levels (computed at signal bar, frozen via `var` on entry)
+// === Trade levels (v1.2 wider R:R)
 // =====================================================
 longStop  = close - atr * atrStopMult
 longRisk  = math.abs(close - longStop)
@@ -140,30 +185,21 @@ shortTp1  = close - shortRisk * tp1Mult
 shortTp2  = close - shortRisk * tp2Mult
 
 // =====================================================
-// === Position state — single source of truth
+// === Position state
 // =====================================================
 var float curEntry = na
 var float curSL    = na
 var float curTp1   = na
 var float curTp2   = na
 var bool  tp1Done  = false
-var int   posDir   = 0  // 1=long, -1=short, 0=flat (mirrors our intended state)
+var int   posDir   = 0  // 1=long, -1=short, 0=flat
 
 useRunner = exitMode == "TP1→TP2 (50% partial + runner, SL→BE)"
 
 // =====================================================
-// === EXIT LOGIC (v1.1 fix) — manual OHLC checks + strategy.close
+// === EXIT LOGIC (carried over from v1.1 — proven reliable)
 // =====================================================
-// Why this works: strategy.close() with explicit price checks is deterministic.
-// We test the bar's high/low directly and decide which level was hit, rather
-// than queuing a bracket order via strategy.exit() and hoping Pine routes it
-// correctly when both limit and stop fall inside the bar.
-//
-// Same-bar conflict resolution: when both SL and TP can be reached within
-// one bar, we assume SL fills first (pessimistic) to match the live backtest
-// model in lib/backtest/evaluateSignal.ts.
-
-// ── LONG exits ────────────────────────────────────────
+// LONG
 if posDir == 1 and strategy.position_size > 0
     slHit  = low  <= curSL
     tp1Hit = high >= curTp1
@@ -171,17 +207,14 @@ if posDir == 1 and strategy.position_size > 0
 
     if useRunner
         if not tp1Done
-            // Phase 1: full position open, SL has priority if both hit
             if slHit
                 strategy.close("L", comment="SL")
                 posDir := 0
             else if tp1Hit
-                // Close 50% at TP1, runner continues with SL → BE
                 strategy.close("L", qty_percent=50, comment="TP1")
                 tp1Done := true
                 curSL   := curEntry
         else
-            // Phase 2: runner — SL has been moved to break-even
             if slHit
                 strategy.close("L", comment="BE")
                 posDir  := 0
@@ -191,7 +224,6 @@ if posDir == 1 and strategy.position_size > 0
                 posDir  := 0
                 tp1Done := false
     else
-        // Simple TP1-only mode — full close on either side
         if slHit
             strategy.close("L", comment="SL")
             posDir := 0
@@ -199,7 +231,7 @@ if posDir == 1 and strategy.position_size > 0
             strategy.close("L", comment="TP1")
             posDir := 0
 
-// ── SHORT exits ───────────────────────────────────────
+// SHORT
 if posDir == -1 and strategy.position_size < 0
     slHit  = high >= curSL
     tp1Hit = low  <= curTp1
@@ -231,20 +263,14 @@ if posDir == -1 and strategy.position_size < 0
             strategy.close("S", comment="TP1")
             posDir := 0
 
-// Defensive reset — if Pine closed the position by other means (e.g. session
-// rollover, margin event), bring our state back in sync so the next signal
-// can fire normally.
+// Defensive reset
 if strategy.position_size == 0 and posDir != 0
     posDir  := 0
     tp1Done := false
 
 // =====================================================
-// === ENTRIES (only when flat per our `posDir` state)
+// === ENTRIES
 // =====================================================
-// Use posDir == 0 as the gate. strategy.position_size may still show the
-// previous size during the same bar a close fires (process_orders_on_close),
-// so it's not a reliable flat-check inside the bar.
-
 if longSignal and posDir == 0
     strategy.entry("L", strategy.long)
     curEntry := close
@@ -266,44 +292,71 @@ if shortSignal and posDir == 0
     lastSignalBar := bar_index
 
 // =====================================================
-// === Plotting — visual markers on chart
+// === Plotting
 // =====================================================
 plot(fastEma,  "Fast EMA",  color=color.new(color.teal, 0),   linewidth=2)
 plot(slowEma,  "Slow EMA",  color=color.new(color.orange, 0), linewidth=2)
 plot(trendEma, "Trend EMA", color=color.new(color.gray, 0),   linewidth=2)
-plot(useHtfFilter ? htfEma : na, "HTF EMA", color=color.new(color.purple, 0), linewidth=1, style=plot.style_circles)
+plot(useHtfFilter   ? htfEma   : na, "HTF EMA",   color=color.new(color.purple, 0), linewidth=1, style=plot.style_circles)
+plot(useDailyTrend  ? dailyEma : na, "Daily EMA", color=color.new(#FF6B35, 0),       linewidth=2, style=plot.style_stepline)
 
 plotshape(longSignal,  title="BUY",  style=shape.labelup,   location=location.belowbar, color=color.new(color.green, 0), text="BUY",  textcolor=color.white, size=size.small)
 plotshape(shortSignal, title="SELL", style=shape.labeldown, location=location.abovebar, color=color.new(color.red,   0), text="SELL", textcolor=color.white, size=size.small)
 
-// Plot active SL / TP levels while in position
+// Active trade levels
 plot(posDir != 0 ? curSL  : na, "SL",  color=color.new(color.red,    0), style=plot.style_linebr, linewidth=1)
 plot(posDir != 0 ? curTp1 : na, "TP1", color=color.new(color.green,  0), style=plot.style_linebr, linewidth=1)
 plot(posDir != 0 and useRunner ? curTp2 : na, "TP2", color=color.new(color.lime, 0), style=plot.style_linebr, linewidth=1)
 
+// Background tint when blocked by a regime filter (helps debug visually)
+regimeBlocked = (useDailyTrend and not dailyTrendUp and not dailyTrendDown) or
+                (useBBSqueeze and not notSqueezed) or
+                (useAtrExpansion and not atrExpanding)
+bgcolor(regimeBlocked ? color.new(color.gray, 95) : na, title="Regime blocked")
+
 // =====================================================
-// === Info panel (top-right)
+// === Info table (top-right) — now with regime state
 // =====================================================
-var table info = table.new(position.top_right, 2, 9, bgcolor=color.new(color.black, 75), border_width=1)
+var table info = table.new(position.top_right, 2, 13, bgcolor=color.new(color.black, 75), border_width=1)
 if barstate.islast
-    table.cell(info, 0, 0, "Net profit",   text_color=color.gray, text_size=size.small)
-    table.cell(info, 1, 0, str.tostring(strategy.netprofit, "#.##"), text_color=strategy.netprofit >= 0 ? color.lime : color.red, text_size=size.small)
-    table.cell(info, 0, 1, "Trades (closed)", text_color=color.gray, text_size=size.small)
-    table.cell(info, 1, 1, str.tostring(strategy.closedtrades), text_color=color.white, text_size=size.small)
+    table.cell(info, 0, 0, "v1.2",         text_color=color.aqua,   text_size=size.small)
+    table.cell(info, 1, 0, "regime-aware", text_color=color.aqua,   text_size=size.small)
+
+    table.cell(info, 0, 1, "Net profit",   text_color=color.gray,   text_size=size.small)
+    table.cell(info, 1, 1, str.tostring(strategy.netprofit, "#.##"), text_color=strategy.netprofit >= 0 ? color.lime : color.red, text_size=size.small)
+
+    table.cell(info, 0, 2, "Trades",       text_color=color.gray,   text_size=size.small)
+    table.cell(info, 1, 2, str.tostring(strategy.closedtrades),     text_color=color.white, text_size=size.small)
+
     winRate = strategy.closedtrades > 0 ? strategy.wintrades / strategy.closedtrades * 100.0 : 0.0
-    table.cell(info, 0, 2, "Win rate",     text_color=color.gray, text_size=size.small)
-    table.cell(info, 1, 2, strategy.closedtrades > 0 ? str.tostring(winRate, "#.#") + "%" : "—", text_color=winRate >= 50 ? color.lime : color.red, text_size=size.small)
+    table.cell(info, 0, 3, "Win rate",     text_color=color.gray,   text_size=size.small)
+    table.cell(info, 1, 3, strategy.closedtrades > 0 ? str.tostring(winRate, "#.#") + "%" : "—", text_color=winRate >= 50 ? color.lime : color.red, text_size=size.small)
+
     pf = strategy.grossloss != 0 ? strategy.grossprofit / math.abs(strategy.grossloss) : 0.0
-    table.cell(info, 0, 3, "Profit factor", text_color=color.gray, text_size=size.small)
-    table.cell(info, 1, 3, strategy.closedtrades > 0 ? str.tostring(pf, "#.##") : "—", text_color=pf >= 1.5 ? color.lime : pf >= 1.0 ? color.yellow : color.red, text_size=size.small)
-    table.cell(info, 0, 4, "Max DD",       text_color=color.gray, text_size=size.small)
-    table.cell(info, 1, 4, str.tostring(strategy.max_drawdown, "#.##"), text_color=color.orange, text_size=size.small)
-    table.cell(info, 0, 5, "Avg trade",    text_color=color.gray, text_size=size.small)
-    avgTrade = strategy.closedtrades > 0 ? strategy.netprofit / strategy.closedtrades : 0.0
-    table.cell(info, 1, 5, strategy.closedtrades > 0 ? str.tostring(avgTrade, "#.##") : "—", text_color=avgTrade >= 0 ? color.lime : color.red, text_size=size.small)
-    table.cell(info, 0, 6, "Open trades",  text_color=color.gray, text_size=size.small)
-    table.cell(info, 1, 6, str.tostring(strategy.opentrades), text_color=color.aqua, text_size=size.small)
-    table.cell(info, 0, 7, "Mode",         text_color=color.gray, text_size=size.small)
-    table.cell(info, 1, 7, useRunner ? "TP1→TP2" : "TP1 only", text_color=color.white, text_size=size.small)
-    table.cell(info, 0, 8, "Time filter",  text_color=color.gray, text_size=size.small)
-    table.cell(info, 1, 8, useTimeFilter ? "ON" : "OFF", text_color=useTimeFilter ? color.lime : color.gray, text_size=size.small)
+    table.cell(info, 0, 4, "Profit factor",text_color=color.gray,   text_size=size.small)
+    table.cell(info, 1, 4, strategy.closedtrades > 0 ? str.tostring(pf, "#.##") : "—", text_color=pf >= 1.5 ? color.lime : pf >= 1.0 ? color.yellow : color.red, text_size=size.small)
+
+    table.cell(info, 0, 5, "Max DD",       text_color=color.gray,   text_size=size.small)
+    table.cell(info, 1, 5, str.tostring(strategy.max_drawdown, "#.##"), text_color=color.orange, text_size=size.small)
+
+    table.cell(info, 0, 6, "Open trades",  text_color=color.gray,   text_size=size.small)
+    table.cell(info, 1, 6, str.tostring(strategy.opentrades),       text_color=color.aqua,  text_size=size.small)
+
+    table.cell(info, 0, 7, "—— Regime ——", text_color=color.silver, text_size=size.small)
+    table.cell(info, 1, 7, "",             text_color=color.silver, text_size=size.small)
+
+    dailyState = useDailyTrend ? (dailyTrendUp ? "UP ✓" : dailyTrendDown ? "DN ✓" : "—") : "off"
+    table.cell(info, 0, 8, "Daily trend",  text_color=color.gray,   text_size=size.small)
+    table.cell(info, 1, 8, dailyState,     text_color=useDailyTrend ? (dailyTrendUp ? color.lime : dailyTrendDown ? color.red : color.gray) : color.gray, text_size=size.small)
+
+    table.cell(info, 0, 9, "BB width",     text_color=color.gray,   text_size=size.small)
+    table.cell(info, 1, 9, useBBSqueeze ? str.tostring(bbWidth * 100, "#.##") + "% " + (notSqueezed ? "✓" : "✗") : "off", text_color=useBBSqueeze ? (notSqueezed ? color.lime : color.orange) : color.gray, text_size=size.small)
+
+    table.cell(info, 0, 10, "ATR exp.",    text_color=color.gray,   text_size=size.small)
+    table.cell(info, 1, 10, useAtrExpansion ? (atrExpanding ? "expanding ✓" : "flat ✗") : "off", text_color=useAtrExpansion ? (atrExpanding ? color.lime : color.orange) : color.gray, text_size=size.small)
+
+    table.cell(info, 0, 11, "Time filter", text_color=color.gray,   text_size=size.small)
+    table.cell(info, 1, 11, useTimeFilter ? (timeOk ? "ok ✓" : "BLK ✗") : "off", text_color=useTimeFilter ? (timeOk ? color.lime : color.orange) : color.gray, text_size=size.small)
+
+    table.cell(info, 0, 12, "Mode",        text_color=color.gray,   text_size=size.small)
+    table.cell(info, 1, 12, useRunner ? "TP1→TP2" : "TP1 only", text_color=color.white, text_size=size.small)
