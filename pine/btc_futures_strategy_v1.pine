@@ -1,21 +1,25 @@
 //@version=6
 // =====================================================
-// BTC Futures Strategy v1 — Backtest mirror of indicator v2
+// BTC Futures Strategy v1.1 — Backtest mirror of indicator v2
+//
+// v1.1 (May 13, 2026): Fixed broken exit logic from v1. The original code
+// used `strategy.exit()` with `qty_percent=50 + limit + stop` simultaneously
+// which left positions stuck open on long backtests (0 closed trades over
+// 16 months in May 2026 test). v1.1 replaces it with explicit price checks
+// + `strategy.close()` calls — bullet-proof, no state ambiguity.
 //
 // Same entry logic as `btc_futures_signal_v2.pine` (EMA cross + RSI + ADX +
-// volume + ATR% + HTF + time filter + cooldown) but runs as strategy() so
-// TradingView's Strategy Tester shows historical LONG/SHORT trades on chart
-// plus win rate, profit factor, drawdown, equity curve, and trade list.
+// volume + ATR% + HTF + time filter + cooldown) so backtest reflects live.
 //
 // Two TP exit modes:
-//   1) "TP1 only"  — close full position at TP1 or SL (simple, conservative)
+//   1) "TP1 only"  — close full position at TP1 or SL (conservative)
 //   2) "TP1→TP2"   — close 50% at TP1, move SL to break-even, runner to TP2
 //                    (matches the live system's Option-A backtest model)
 //
 // IMPORTANT: This file is for backtesting / visual analysis only. The live
 // production webhook still runs from btc_futures_signal_v2.pine.
 // =====================================================
-strategy("BTC Futures Strategy v1 (backtest)",
+strategy("BTC Futures Strategy v1.1 (backtest)",
      overlay=true,
      initial_capital=10000,
      default_qty_type=strategy.percent_of_equity,
@@ -123,7 +127,7 @@ longSignal  = enableLong  and barReady and rawLong  and trendUp   and trendStron
 shortSignal = enableShort and barReady and rawShort and trendDown and trendStrong and volOk and atrOk and htfDown and canSignal and timeOk and inDateWindow
 
 // =====================================================
-// === Trade levels (computed at signal bar, then frozen)
+// === Trade levels (computed at signal bar, frozen via `var` on entry)
 // =====================================================
 longStop  = close - atr * atrStopMult
 longRisk  = math.abs(close - longStop)
@@ -136,21 +140,112 @@ shortTp1  = close - shortRisk * tp1Mult
 shortTp2  = close - shortRisk * tp2Mult
 
 // =====================================================
-// === Position state — needed for TP1→TP2 runner mode
+// === Position state — single source of truth
 // =====================================================
 var float curEntry = na
 var float curSL    = na
 var float curTp1   = na
 var float curTp2   = na
 var bool  tp1Done  = false
-var int   posDir   = 0  // 1 = long, -1 = short, 0 = flat
+var int   posDir   = 0  // 1=long, -1=short, 0=flat (mirrors our intended state)
 
 useRunner = exitMode == "TP1→TP2 (50% partial + runner, SL→BE)"
 
 // =====================================================
-// === Entries
+// === EXIT LOGIC (v1.1 fix) — manual OHLC checks + strategy.close
 // =====================================================
-if longSignal and strategy.position_size == 0
+// Why this works: strategy.close() with explicit price checks is deterministic.
+// We test the bar's high/low directly and decide which level was hit, rather
+// than queuing a bracket order via strategy.exit() and hoping Pine routes it
+// correctly when both limit and stop fall inside the bar.
+//
+// Same-bar conflict resolution: when both SL and TP can be reached within
+// one bar, we assume SL fills first (pessimistic) to match the live backtest
+// model in lib/backtest/evaluateSignal.ts.
+
+// ── LONG exits ────────────────────────────────────────
+if posDir == 1 and strategy.position_size > 0
+    slHit  = low  <= curSL
+    tp1Hit = high >= curTp1
+    tp2Hit = high >= curTp2
+
+    if useRunner
+        if not tp1Done
+            // Phase 1: full position open, SL has priority if both hit
+            if slHit
+                strategy.close("L", comment="SL")
+                posDir := 0
+            else if tp1Hit
+                // Close 50% at TP1, runner continues with SL → BE
+                strategy.close("L", qty_percent=50, comment="TP1")
+                tp1Done := true
+                curSL   := curEntry
+        else
+            // Phase 2: runner — SL has been moved to break-even
+            if slHit
+                strategy.close("L", comment="BE")
+                posDir  := 0
+                tp1Done := false
+            else if tp2Hit
+                strategy.close("L", comment="TP2")
+                posDir  := 0
+                tp1Done := false
+    else
+        // Simple TP1-only mode — full close on either side
+        if slHit
+            strategy.close("L", comment="SL")
+            posDir := 0
+        else if tp1Hit
+            strategy.close("L", comment="TP1")
+            posDir := 0
+
+// ── SHORT exits ───────────────────────────────────────
+if posDir == -1 and strategy.position_size < 0
+    slHit  = high >= curSL
+    tp1Hit = low  <= curTp1
+    tp2Hit = low  <= curTp2
+
+    if useRunner
+        if not tp1Done
+            if slHit
+                strategy.close("S", comment="SL")
+                posDir := 0
+            else if tp1Hit
+                strategy.close("S", qty_percent=50, comment="TP1")
+                tp1Done := true
+                curSL   := curEntry
+        else
+            if slHit
+                strategy.close("S", comment="BE")
+                posDir  := 0
+                tp1Done := false
+            else if tp2Hit
+                strategy.close("S", comment="TP2")
+                posDir  := 0
+                tp1Done := false
+    else
+        if slHit
+            strategy.close("S", comment="SL")
+            posDir := 0
+        else if tp1Hit
+            strategy.close("S", comment="TP1")
+            posDir := 0
+
+// Defensive reset — if Pine closed the position by other means (e.g. session
+// rollover, margin event), bring our state back in sync so the next signal
+// can fire normally.
+if strategy.position_size == 0 and posDir != 0
+    posDir  := 0
+    tp1Done := false
+
+// =====================================================
+// === ENTRIES (only when flat per our `posDir` state)
+// =====================================================
+// Use posDir == 0 as the gate. strategy.position_size may still show the
+// previous size during the same bar a close fires (process_orders_on_close),
+// so it's not a reliable flat-check inside the bar.
+
+if longSignal and posDir == 0
     strategy.entry("L", strategy.long)
     curEntry := close
     curSL    := longStop
@@ -160,7 +255,7 @@ if longSignal and strategy.position_size == 0
     posDir   := 1
     lastSignalBar := bar_index
 
-if shortSignal and strategy.position_size == 0
+if shortSignal and posDir == 0
     strategy.entry("S", strategy.short)
     curEntry := close
     curSL    := shortStop
@@ -169,44 +264,6 @@ if shortSignal and strategy.position_size == 0
     tp1Done  := false
     posDir   := -1
     lastSignalBar := bar_index
-
-// =====================================================
-// === Exits
-// =====================================================
-if posDir == 1 and strategy.position_size > 0
-    if useRunner
-        if not tp1Done
-            // Close 50% at TP1, hold runner
-            strategy.exit("TP1 L", from_entry="L", qty_percent=50, limit=curTp1, stop=curSL, comment_profit="TP1", comment_loss="SL")
-        else
-            // Runner: SL moved to break-even, target TP2
-            strategy.exit("TP2 L", from_entry="L", limit=curTp2, stop=curSL, comment_profit="TP2", comment_loss="BE")
-
-        // Detect TP1 hit on this bar to switch to runner state next bar
-        if not tp1Done and high >= curTp1
-            tp1Done := true
-            curSL := curEntry  // move SL to break-even
-    else
-        // Simple mode: full close at TP1 or SL
-        strategy.exit("Exit L", from_entry="L", limit=curTp1, stop=curSL, comment_profit="TP1", comment_loss="SL")
-
-if posDir == -1 and strategy.position_size < 0
-    if useRunner
-        if not tp1Done
-            strategy.exit("TP1 S", from_entry="S", qty_percent=50, limit=curTp1, stop=curSL, comment_profit="TP1", comment_loss="SL")
-        else
-            strategy.exit("TP2 S", from_entry="S", limit=curTp2, stop=curSL, comment_profit="TP2", comment_loss="BE")
-
-        if not tp1Done and low <= curTp1
-            tp1Done := true
-            curSL := curEntry
-    else
-        strategy.exit("Exit S", from_entry="S", limit=curTp1, stop=curSL, comment_profit="TP1", comment_loss="SL")
-
-// Reset state when flat
-if strategy.position_size == 0 and posDir != 0
-    posDir := 0
-    tp1Done := false
 
 // =====================================================
 // === Plotting — visual markers on chart
@@ -220,31 +277,33 @@ plotshape(longSignal,  title="BUY",  style=shape.labelup,   location=location.be
 plotshape(shortSignal, title="SELL", style=shape.labeldown, location=location.abovebar, color=color.new(color.red,   0), text="SELL", textcolor=color.white, size=size.small)
 
 // Plot active SL / TP levels while in position
-plot(strategy.position_size != 0 ? curSL  : na, "SL",  color=color.new(color.red,    0), style=plot.style_linebr, linewidth=1)
-plot(strategy.position_size != 0 ? curTp1 : na, "TP1", color=color.new(color.green,  0), style=plot.style_linebr, linewidth=1)
-plot(strategy.position_size != 0 and useRunner ? curTp2 : na, "TP2", color=color.new(color.lime, 0), style=plot.style_linebr, linewidth=1)
+plot(posDir != 0 ? curSL  : na, "SL",  color=color.new(color.red,    0), style=plot.style_linebr, linewidth=1)
+plot(posDir != 0 ? curTp1 : na, "TP1", color=color.new(color.green,  0), style=plot.style_linebr, linewidth=1)
+plot(posDir != 0 and useRunner ? curTp2 : na, "TP2", color=color.new(color.lime, 0), style=plot.style_linebr, linewidth=1)
 
 // =====================================================
 // === Info panel (top-right)
 // =====================================================
-var table info = table.new(position.top_right, 2, 8, bgcolor=color.new(color.black, 75), border_width=1)
+var table info = table.new(position.top_right, 2, 9, bgcolor=color.new(color.black, 75), border_width=1)
 if barstate.islast
     table.cell(info, 0, 0, "Net profit",   text_color=color.gray, text_size=size.small)
     table.cell(info, 1, 0, str.tostring(strategy.netprofit, "#.##"), text_color=strategy.netprofit >= 0 ? color.lime : color.red, text_size=size.small)
-    table.cell(info, 0, 1, "Trades",       text_color=color.gray, text_size=size.small)
+    table.cell(info, 0, 1, "Trades (closed)", text_color=color.gray, text_size=size.small)
     table.cell(info, 1, 1, str.tostring(strategy.closedtrades), text_color=color.white, text_size=size.small)
     winRate = strategy.closedtrades > 0 ? strategy.wintrades / strategy.closedtrades * 100.0 : 0.0
     table.cell(info, 0, 2, "Win rate",     text_color=color.gray, text_size=size.small)
-    table.cell(info, 1, 2, str.tostring(winRate, "#.#") + "%", text_color=winRate >= 50 ? color.lime : color.red, text_size=size.small)
+    table.cell(info, 1, 2, strategy.closedtrades > 0 ? str.tostring(winRate, "#.#") + "%" : "—", text_color=winRate >= 50 ? color.lime : color.red, text_size=size.small)
     pf = strategy.grossloss != 0 ? strategy.grossprofit / math.abs(strategy.grossloss) : 0.0
     table.cell(info, 0, 3, "Profit factor", text_color=color.gray, text_size=size.small)
-    table.cell(info, 1, 3, str.tostring(pf, "#.##"), text_color=pf >= 1.5 ? color.lime : pf >= 1.0 ? color.yellow : color.red, text_size=size.small)
+    table.cell(info, 1, 3, strategy.closedtrades > 0 ? str.tostring(pf, "#.##") : "—", text_color=pf >= 1.5 ? color.lime : pf >= 1.0 ? color.yellow : color.red, text_size=size.small)
     table.cell(info, 0, 4, "Max DD",       text_color=color.gray, text_size=size.small)
     table.cell(info, 1, 4, str.tostring(strategy.max_drawdown, "#.##"), text_color=color.orange, text_size=size.small)
     table.cell(info, 0, 5, "Avg trade",    text_color=color.gray, text_size=size.small)
     avgTrade = strategy.closedtrades > 0 ? strategy.netprofit / strategy.closedtrades : 0.0
-    table.cell(info, 1, 5, str.tostring(avgTrade, "#.##"), text_color=avgTrade >= 0 ? color.lime : color.red, text_size=size.small)
-    table.cell(info, 0, 6, "Mode",         text_color=color.gray, text_size=size.small)
-    table.cell(info, 1, 6, useRunner ? "TP1→TP2" : "TP1 only", text_color=color.white, text_size=size.small)
-    table.cell(info, 0, 7, "Time filter",  text_color=color.gray, text_size=size.small)
-    table.cell(info, 1, 7, useTimeFilter ? "ON" : "OFF", text_color=useTimeFilter ? color.lime : color.gray, text_size=size.small)
+    table.cell(info, 1, 5, strategy.closedtrades > 0 ? str.tostring(avgTrade, "#.##") : "—", text_color=avgTrade >= 0 ? color.lime : color.red, text_size=size.small)
+    table.cell(info, 0, 6, "Open trades",  text_color=color.gray, text_size=size.small)
+    table.cell(info, 1, 6, str.tostring(strategy.opentrades), text_color=color.aqua, text_size=size.small)
+    table.cell(info, 0, 7, "Mode",         text_color=color.gray, text_size=size.small)
+    table.cell(info, 1, 7, useRunner ? "TP1→TP2" : "TP1 only", text_color=color.white, text_size=size.small)
+    table.cell(info, 0, 8, "Time filter",  text_color=color.gray, text_size=size.small)
+    table.cell(info, 1, 8, useTimeFilter ? "ON" : "OFF", text_color=useTimeFilter ? color.lime : color.gray, text_size=size.small)
