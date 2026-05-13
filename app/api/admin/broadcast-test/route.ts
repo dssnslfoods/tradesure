@@ -1,7 +1,17 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSupabaseAdmin } from "@/lib/supabase/server";
-import { broadcastTelegramMessage } from "@/lib/telegram/sendTelegramMessage";
+import {
+  broadcastTelegramMessage,
+  buildConfigBroadcastMessage,
+  type ConfigBroadcastInput,
+} from "@/lib/telegram/sendTelegramMessage";
 import { isCurrentUserAdmin } from "@/lib/auth/guards";
+import {
+  getMaskedApiKeys,
+  getScheduleConfig,
+  isWithinAiSchedule,
+} from "@/lib/schedule/settings";
+import { findModel } from "@/lib/ai/models";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -56,33 +66,97 @@ export async function GET() {
   });
 }
 
+/**
+ * Test broadcast doubles as a system-status announcement: every recipient
+ * gets a snapshot of the current AI model / schedule / filters so they
+ * understand what the bot is doing right now. Useful after config changes
+ * ("FYI we just enabled Gemini 2.5 Pro" / "AI is now Mon-Fri only").
+ *
+ * Falls back gracefully if any settings query fails so the test broadcast
+ * itself still goes out even if Supabase is having a moment.
+ */
+async function buildSnapshot(): Promise<ConfigBroadcastInput> {
+  // Helpers to summarise the schedule the same way the dashboard does.
+  const describeWindows = (windows: { start: number; end: number }[]): string => {
+    if (windows.length === 0) return "24h (always on)";
+    return windows
+      .map((w) => {
+        const s = `${String(w.start).padStart(2, "0")}:00`;
+        const e = `${String(w.end).padStart(2, "0")}:00`;
+        if (w.start === w.end) return "24h";
+        if (w.start > w.end) return `${s}–${e} (overnight)`;
+        return `${s}–${e}`;
+      })
+      .join(" + ");
+  };
+  const describeDays = (days: number[]): string => {
+    if (days.length === 7) return "Every day";
+    const names = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+    return days.map((d) => names[d]).join(", ");
+  };
+
+  const supabase = getSupabaseAdmin();
+  const [cfg, apiKeys, queuedRes, totalRes, contactsRes] = await Promise.all([
+    getScheduleConfig().catch(() => null),
+    getMaskedApiKeys().catch(() => null),
+    supabase
+      .from("ai_signal_analysis")
+      .select("id", { count: "exact", head: true })
+      .eq("outcome", "QUEUED"),
+    supabase.from("ai_signal_analysis").select("id", { count: "exact", head: true }),
+    supabase
+      .from("auth_users")
+      .select("id", { count: "exact", head: true })
+      .not("telegram_chat_id", "is", null),
+  ]);
+
+  const primaryInfo = cfg?.ai_model ? findModel(cfg.ai_model) : undefined;
+  const secondaryInfo = cfg?.ai_model_secondary ? findModel(cfg.ai_model_secondary) : undefined;
+
+  const providerLabel = (p?: string) =>
+    p === "gemini" ? "Google Gemini" : p === "openai" ? "OpenAI" : "—";
+
+  return {
+    schedulerEnabled: cfg?.enabled ?? true,
+    pauseReason: cfg?.paused_reason ?? null,
+    intervalMinutes: cfg?.interval_minutes ?? 15,
+    cardRetentionDays: cfg?.card_retention_days ?? 7,
+
+    aiModel: cfg?.ai_model ?? "gpt-4o-mini",
+    aiMode: cfg?.ai_mode ?? "single",
+    aiModelSecondary: cfg?.ai_model_secondary ?? "",
+    primaryProviderLabel: providerLabel(primaryInfo?.provider),
+    secondaryProviderLabel: providerLabel(secondaryInfo?.provider),
+
+    openaiKeyConfigured: apiKeys?.openai.configured ?? false,
+    openaiKeySource: apiKeys?.openai.source ?? "none",
+    geminiKeyConfigured: apiKeys?.gemini.configured ?? false,
+    geminiKeySource: apiKeys?.gemini.source ?? "none",
+
+    aiActiveNow: cfg
+      ? isWithinAiSchedule(cfg.ai_active_windows, cfg.ai_active_days)
+      : true,
+    aiActiveWindowsSummary: describeWindows(cfg?.ai_active_windows ?? []),
+    aiActiveDaysSummary: describeDays(cfg?.ai_active_days ?? [0, 1, 2, 3, 4, 5, 6]),
+
+    minConfidence: process.env.MIN_CONFIDENCE ?? "70",
+    blockedHours: process.env.BLOCKED_HOURS ?? "13,14,16,17,20",
+    notradeTelegram: process.env.NOTRADE_TELEGRAM ?? "1",
+
+    telegramContactCount: contactsRes.count ?? 0,
+    totalSignals: totalRes.count ?? 0,
+    queuedCount: queuedRes.count ?? 0,
+  };
+}
+
 export async function POST(req: NextRequest) {
   if (!(await isCurrentUserAdmin())) {
     return NextResponse.json({ ok: false, error: "admin only" }, { status: 403 });
   }
 
   const recipients = await listRecipients();
-  const ts = new Date().toLocaleString("en-GB", { hour12: false });
-
-  const message = [
-    "🧪 <b>Broadcast Test</b>",
-    "━━━━━━━━━━━━━━━━━━━━",
-    "",
-    `Triggered by admin at ${ts}`,
-    "",
-    `📡 จะส่งไปทั้งหมด <b>${recipients.uniqueChatIds.length}</b> chat(s):`,
-    "",
-    `• env <code>TELEGRAM_CHAT_ID</code>: ${recipients.envChatId ?? "(not set)"}`,
-    "",
-    `• Active users (${recipients.activeUsers.length}):`,
-    ...recipients.activeUsers.map(
-      (u) => `  - <b>${u.username}</b>: <code>${u.chat_id}</code>`
-    ),
-    "",
-    "ถ้าคุณได้รับข้อความนี้ = broadcast multi-user ทำงานถูกต้อง ✅",
-    "",
-    "<i>(ไม่ใช่ trading signal — แค่ทดสอบระบบ)</i>",
-  ].join("\n");
+  const snapshot = await buildSnapshot();
+  const message = buildConfigBroadcastMessage(snapshot);
 
   const result = await broadcastTelegramMessage(message);
   void req;
@@ -93,5 +167,6 @@ export async function POST(req: NextRequest) {
     failed: result.failed,
     errors: result.errors,
     recipients: recipients.uniqueChatIds,
+    snapshot,
   });
 }

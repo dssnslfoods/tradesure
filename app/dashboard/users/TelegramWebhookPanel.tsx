@@ -82,9 +82,9 @@ export default function TelegramWebhookPanel() {
         if (data.ok) {
           setMsg({
             tone: "success",
-            text: `Broadcast test ส่งสำเร็จ ${data.sent} chat${
+            text: `ส่ง Configuration snapshot สำเร็จ — ${data.sent} chat${
               data.failed ? ` (failed ${data.failed})` : ""
-            } — ตรวจ Telegram`,
+            } ได้รับสรุประบบใน Telegram`,
           });
         } else {
           setMsg({
@@ -130,10 +130,11 @@ export default function TelegramWebhookPanel() {
             type="button"
             onClick={onTestBroadcast}
             disabled={pending}
+            title="ส่ง Configuration snapshot ไปยังทุก user ผ่าน Telegram — เป็นทั้ง test broadcast และ system status update"
             className="btn !bg-sig-warn/15 !text-sig-warn !border-sig-warn/30 hover:!bg-sig-warn/25 !py-1.5 !text-[11px] disabled:opacity-40"
           >
             <Icon name="send" size={12} />
-            Test broadcast
+            Broadcast status
           </button>
           {(isUnset || isOtherUrl) && (
             <button

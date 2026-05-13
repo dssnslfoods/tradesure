@@ -326,6 +326,116 @@ export function buildNoTradeMessage(payload: NoTradePayload): string {
   ].join("\n");
 }
 
+// ─── Configuration broadcast ──────────────────────────────────────────────
+// Admin "Test broadcast" doubles as a system-status announcement: every
+// active recipient gets a snapshot of the current setup so they know what
+// the bot is doing right now (which AI model, which schedule, which filters).
+export interface ConfigBroadcastInput {
+  // From BacktestScheduleConfig
+  schedulerEnabled: boolean;
+  pauseReason: string | null;
+  intervalMinutes: number;
+  cardRetentionDays: number;
+
+  // AI
+  aiModel: string;
+  aiMode: "single" | "compare" | "vote";
+  aiModelSecondary: string;
+  primaryProviderLabel: string;       // e.g., "OpenAI", "Google"
+  secondaryProviderLabel: string;
+
+  // API keys (configured status only — no plaintext)
+  openaiKeyConfigured: boolean;
+  openaiKeySource: "db" | "env" | "none";
+  geminiKeyConfigured: boolean;
+  geminiKeySource: "db" | "env" | "none";
+
+  // Schedule
+  aiActiveNow: boolean;
+  aiActiveWindowsSummary: string;     // pre-formatted by caller
+  aiActiveDaysSummary: string;        // pre-formatted by caller
+
+  // Filters / env
+  minConfidence: string;
+  blockedHours: string;
+  notradeTelegram: string;
+
+  // Connections
+  telegramContactCount: number;
+  totalSignals: number;
+  queuedCount: number;
+}
+
+export function buildConfigBroadcastMessage(c: ConfigBroadcastInput): string {
+  const ts = new Date().toLocaleString("en-GB", {
+    timeZone: "Asia/Bangkok",
+    hour12: false,
+  });
+
+  const statusEmoji = c.schedulerEnabled ? "🟢" : "🟡";
+  const aiNowEmoji = c.aiActiveNow ? "🟢 active" : "🟡 idle";
+
+  const keyStatus = (configured: boolean, source: string) => {
+    if (!configured) return "❌ <i>not set</i>";
+    return source === "db" ? "✅ <code>DB</code>" : "✅ <code>ENV</code>";
+  };
+
+  const modeLabel = c.aiMode === "vote"
+    ? "🤝 Vote (consensus)"
+    : c.aiMode === "compare"
+    ? "🔀 Compare (parallel)"
+    : "🎯 Single";
+
+  const lines: string[] = [
+    "📢 <b>System Status Update</b>",
+    "━━━━━━━━━━━━━━━━━━━━",
+    `<i>Snapshot at ${ts} (BKK)</i>`,
+    "",
+    `${statusEmoji} <b>System</b>: ${c.schedulerEnabled ? "ACTIVE" : "PAUSED"}`,
+  ];
+  if (!c.schedulerEnabled && c.pauseReason) {
+    lines.push(`   Reason: ${escapeHtml(c.pauseReason)}`);
+  }
+  lines.push(
+    `📊 <b>Signals tracked</b>: ${c.totalSignals.toLocaleString()}`,
+    `📥 <b>Queue</b>: ${c.queuedCount} awaiting AI`,
+    "",
+    "🤖 <b>AI Engine</b>",
+    `   Mode: ${modeLabel}`,
+    `   Primary: <code>${escapeHtml(c.aiModel)}</code> (${escapeHtml(c.primaryProviderLabel)})`,
+  );
+  if (c.aiMode !== "single") {
+    lines.push(
+      `   Secondary: <code>${escapeHtml(c.aiModelSecondary)}</code> (${escapeHtml(c.secondaryProviderLabel)})`
+    );
+  }
+  lines.push(
+    "",
+    "🔑 <b>API Keys</b>",
+    `   OpenAI: ${keyStatus(c.openaiKeyConfigured, c.openaiKeySource)}`,
+    `   Gemini: ${keyStatus(c.geminiKeyConfigured, c.geminiKeySource)}`,
+    "",
+    "📅 <b>AI Schedule</b>",
+    `   Status: ${aiNowEmoji}`,
+    `   Windows: <code>${escapeHtml(c.aiActiveWindowsSummary)}</code>`,
+    `   Days: <code>${escapeHtml(c.aiActiveDaysSummary)}</code>`,
+    "",
+    "⚙️ <b>Quality Filters</b>",
+    `   Min confidence: <b>${escapeHtml(c.minConfidence)}%</b>`,
+    `   Blocked hours (BKK): <code>${escapeHtml(c.blockedHours || "none")}</code>`,
+    `   NO_TRADE Telegram: ${c.notradeTelegram === "0" ? "OFF" : "ON"}`,
+    `   Card retention: ${c.cardRetentionDays} days`,
+    "",
+    "🔌 <b>Connections</b>",
+    `   Active Telegram contacts: ${c.telegramContactCount}`,
+    "",
+    "━━━━━━━━━━━━━━━━━━━━",
+    "<i>ระบบส่ง snapshot นี้เมื่อ admin กดทดสอบ — เพื่อให้ทุกคนเห็นว่า bot กำลังตั้งค่าไว้แบบไหน</i>"
+  );
+
+  return lines.join("\n");
+}
+
 export async function sendTelegramToChat(
   chatId: string,
   message: string
