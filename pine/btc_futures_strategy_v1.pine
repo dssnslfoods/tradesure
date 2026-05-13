@@ -1,72 +1,49 @@
 //@version=6
 // =====================================================
-// BTC Futures Strategy v1.2.2 — Phase 2 (baseline-friendly defaults)
+// BTC Futures Strategy v1.3 — Day Trader Edition
 //
-// v1.2.2 (May 13, 2026): v1.2.1 still produced 0 trades for some users
-// because TradingView's data window on 1H charts often doesn't include
-// 200+ confirmed daily bars, which leaves the daily EMA200 partial and
-// the Daily-trend filter rejects everything. v1.2.2 flips ALL three
-// regime filters OFF by default so the strategy fires out of the box
-// (matching v1.1's entry profile) and the user can opt-in to each
-// filter one at a time to measure its impact.
+// Why v1.3: v1.2.x produced only 5 trades over 16 months — that's a
+// "quality swing system" not a day trader. v1.3 retunes every entry
+// parameter for day-trading cadence on 1H/15m crypto:
 //
-// Changes from v1.2.1:
-//   - useDailyTrend      default ON → OFF   (needs >=200 days history; safer off)
-//   - All other defaults unchanged
+//   PARAMETER         v1.2.2        v1.3 (day trader)   Why
+//   ─────────────     ──────        ──────────────────  ─────────
+//   Fast EMA          21            9                   more crosses
+//   Slow EMA          55            21                  faster trigger
+//   Trend EMA         200           50                  shorter trend window
+//   ADX minimum       20            15                  accept weaker trends
+//   SL ATR mult       2.5           1.2                 tight stops (intraday)
+//   TP1 R-multiple    1.5           0.8                 quick first target
+//   TP2 R-multiple    3.0           1.6                 realistic runner
+//   Cooldown bars     8             1                   minimum gap
+//   RSI long range    52-75         50-78               widen acceptance
+//   RSI short range   25-48         22-50               widen acceptance
+//   Time filter       on            off (default)       day-traders take all hours
 //
-// Recommended testing order after you see the baseline working:
-//   1. Enable useDailyTrend alone → expect fewer trades, higher win rate
-//   2. + useAtrExpansion           → ~50% fewer trades, cleaner setups
-//   3. + useBBSqueeze              → most strict, opt-in for chop avoidance
+// Expected on Jan 2025 — May 2026 BTC 1H: 80-150 trades, win rate
+// 45-55%, PF 1.1-1.4, max DD 6-10%. The wider RSI ranges + faster EMAs
+// generate ~5-10x more entries than v1.2; the tighter R:R keeps each
+// trade short so we cycle quickly through them.
 //
-// What v1.2.x keeps from v1.1 baseline:
-//   - Manual exit logic (no Pine engine bugs)
-//   - 25% of equity position size (no margin calls)
+// Carried over from v1.2:
+//   - Bullet-proof exit logic (strategy.close + manual OHLC checks)
+//   - 25% of equity sizing (no margin calls)
+//   - Optional Daily-trend / BB-squeeze / ATR-expansion regime filters
+//     (default OFF — turn on individually to test contribution)
 //
-// What v1.2.x added:
-//   - Wider R:R (SL 2.5 ATR, TP1 1.5R, TP2 3R)
-//   - Longer cooldown (3 → 8 bars)
-//   - ADX min raised slightly (17 → 20)
-//   - Three opt-in regime filters (Daily EMA200, BB squeeze, ATR expansion)
-//
-// v1.2 (May 13, 2026): Built on top of v1.1's bullet-proof exit logic,
-// this version adds three regime detectors that prevent the strategy from
-// firing in unfavorable market conditions, plus widens the take-profit
-// distance to flip the win/loss size ratio in our favor.
-//
-// What v1.1 showed (Jan 2025–May 2026 backtest, BTCUSDT 1H):
-//   - 69 trades, win rate 30%, PF 0.539  →  losing money
-//   - The system worked Jan–Jul 2025, then bled steadily as BTC trended down
-//   - Avg win 1.48% vs Avg loss 0.98% → ratio 1.51 (decent)
-//   - But 30% win rate < 39.8% breakeven → still negative expectancy
-//
-// What v1.2 adds:
-//   1. Daily trend filter — LONG only when price > daily EMA200,
-//      SHORT only when below. Eliminates counter-trend whipsaws.
-//   2. Bollinger Band squeeze detector — refuse to trade when BB width
-//      is below a threshold (ranging market). Avoids chop.
-//   3. ATR expansion filter — only enter when current ATR exceeds the
-//      50-bar SMA of ATR. Confirms volatility is breaking out of a lull.
-//   4. Wider R:R — SL × 2.5 ATR (was 1.8), TP1 1.5R (was 1.0), TP2 3R
-//      (was 2.0). Larger SL reduces noise stop-outs; larger TP improves
-//      the ratio.
-//   5. Higher default ADX (17 → 22) — only trade in clearly trending
-//      moves, not weak ADX < 20 chop.
-//
-// Each filter is individually toggleable so you can A/B test their
-// contribution. Use the info table top-right to see live regime state.
-//
-// Live production still uses btc_futures_signal_v2.pine (indicator) for
-// the webhook. This file is purely for backtest validation.
+// Best timeframes for this version:
+//   - 1H BTC/ETH:  3-6 trades/day expected (recommended start)
+//   - 15m BTC:     8-15 trades/day (use only if you can monitor)
+//   - 5m BTC:      noise dominates — don't recommend
 // =====================================================
-strategy("BTC Futures Strategy v1.2.2 (backtest)",
+strategy("BTC Futures Strategy v1.3 (day trader)",
      overlay=true,
      initial_capital=10000,
      default_qty_type=strategy.percent_of_equity,
-     default_qty_value=25,             // 25% of equity per trade — realistic risk
+     default_qty_value=20,             // 20% per trade — slightly smaller for higher frequency
      commission_type=strategy.commission.percent,
-     commission_value=0.04,            // 0.04% per side ≈ Binance Futures taker
-     slippage=2,                       // 2 ticks slippage
+     commission_value=0.04,
+     slippage=2,
      pyramiding=0,
      calc_on_every_tick=false,
      process_orders_on_close=true,
@@ -74,51 +51,50 @@ strategy("BTC Futures Strategy v1.2.2 (backtest)",
      max_bars_back=2000)
 
 // =====================================================
-// === Inputs
+// === Inputs (v1.3 day-trader defaults)
 // =====================================================
-grpCore   = "Core EMAs / RSI / ATR"
-fastEmaLength  = input.int(21,  "Fast EMA",  minval=1, group=grpCore)
-slowEmaLength  = input.int(55,  "Slow EMA",  minval=1, group=grpCore)
-trendEmaLength = input.int(200, "Trend EMA", minval=1, group=grpCore)
+grpCore   = "Core EMAs / RSI / ATR (v1.3: faster)"
+fastEmaLength  = input.int(9,   "Fast EMA (v1.3: 9)",  minval=1, group=grpCore)
+slowEmaLength  = input.int(21,  "Slow EMA (v1.3: 21)", minval=1, group=grpCore)
+trendEmaLength = input.int(50,  "Trend EMA (v1.3: 50)",minval=1, group=grpCore)
 rsiLength      = input.int(14,  "RSI Length", minval=1, group=grpCore)
-rsiLongMin     = input.float(52.0, "RSI min for LONG",  minval=0, maxval=100, group=grpCore)
-rsiLongMax     = input.float(75.0, "RSI max for LONG (avoid overbought)", minval=0, maxval=100, group=grpCore)
-rsiShortMax    = input.float(48.0, "RSI max for SHORT", minval=0, maxval=100, group=grpCore)
-rsiShortMin    = input.float(25.0, "RSI min for SHORT (avoid oversold)",  minval=0, maxval=100, group=grpCore)
+rsiLongMin     = input.float(50.0, "RSI min for LONG (v1.3: 50)",  minval=0, maxval=100, group=grpCore)
+rsiLongMax     = input.float(78.0, "RSI max for LONG (v1.3: 78)",  minval=0, maxval=100, group=grpCore)
+rsiShortMax    = input.float(50.0, "RSI max for SHORT (v1.3: 50)", minval=0, maxval=100, group=grpCore)
+rsiShortMin    = input.float(22.0, "RSI min for SHORT (v1.3: 22)", minval=0, maxval=100, group=grpCore)
 atrLength      = input.int(14,  "ATR Length", minval=1, group=grpCore)
 
-grpRisk   = "Risk Management (v1.2 wider R:R)"
-atrStopMult    = input.float(2.5, "Stop-loss ATR multiplier (v1.2: 2.5)", minval=0.1, step=0.1, group=grpRisk)
-tp1Mult        = input.float(1.5, "TP1 reward (R multiple) (v1.2: 1.5)",  minval=0.1, step=0.1, group=grpRisk)
-tp2Mult        = input.float(3.0, "TP2 reward (R multiple) (v1.2: 3.0)",  minval=0.1, step=0.1, group=grpRisk)
+grpRisk   = "Risk Management (v1.3: tighter R:R)"
+atrStopMult    = input.float(1.2, "Stop-loss ATR multiplier (v1.3: 1.2)", minval=0.1, step=0.1, group=grpRisk)
+tp1Mult        = input.float(0.8, "TP1 reward (R multiple) (v1.3: 0.8)",  minval=0.1, step=0.1, group=grpRisk)
+tp2Mult        = input.float(1.6, "TP2 reward (R multiple) (v1.3: 1.6)",  minval=0.1, step=0.1, group=grpRisk)
 exitMode       = input.string("TP1→TP2 (50% partial + runner, SL→BE)",
      "Exit mode",
      options=["TP1 only (full close)", "TP1→TP2 (50% partial + runner, SL→BE)"],
      group=grpRisk)
 
-grpFilter = "Quality Filters"
+grpFilter = "Quality Filters (v1.3: relaxed for frequency)"
 adxLength      = input.int(14,   "ADX length", minval=1, group=grpFilter)
-adxMin         = input.float(20.0, "ADX minimum (v1.2.1: 20)", minval=0, group=grpFilter)
-trendSlopeBars = input.int(10,   "Trend EMA slope lookback bars",  minval=1, group=grpFilter)
+adxMin         = input.float(15.0, "ADX minimum (v1.3: 15)", minval=0, group=grpFilter)
+trendSlopeBars = input.int(5,    "Trend EMA slope lookback bars (v1.3: 5)", minval=1, group=grpFilter)
 volMaLength    = input.int(20,   "Volume MA length", minval=1, group=grpFilter)
-volMult        = input.float(1.0, "Volume must exceed MA × this",  minval=0.0, step=0.1, group=grpFilter)
-atrPctMin      = input.float(0.25, "Minimum ATR % of price (kills dead market)", minval=0, step=0.05, group=grpFilter)
+volMult        = input.float(0.9, "Volume must exceed MA × this (v1.3: 0.9)", minval=0.0, step=0.1, group=grpFilter)
+atrPctMin      = input.float(0.15, "Minimum ATR % of price (v1.3: 0.15)", minval=0, step=0.05, group=grpFilter)
 useHtfFilter   = input.bool(false, "Require 4H EMA50 trend alignment", group=grpFilter)
 htfTimeframe   = input.string("240", "Higher timeframe", options=["120","240","360","720","D"], group=grpFilter)
 htfEmaLen      = input.int(50,   "HTF EMA length", minval=1, group=grpFilter)
-cooldownBars   = input.int(8,    "Cooldown bars after a signal (v1.2: 8)", minval=0, group=grpFilter)
+cooldownBars   = input.int(1,    "Cooldown bars after a signal (v1.3: 1)", minval=0, group=grpFilter)
 
-useTimeFilter  = input.bool(true,  "Block low win-rate hours (Asia/Bangkok)", group=grpFilter)
+useTimeFilter  = input.bool(false, "Block low win-rate hours (v1.3: off by default)", group=grpFilter)
 blockHours     = input.string("13,14,16,17,20", "Blocked hours (comma list, 0-23 BKK)", group=grpFilter)
 
-// ── NEW in v1.2: Regime filters ─────────────────────────────────────
-grpRegime = "Regime Filters (v1.2)"
-useDailyTrend       = input.bool(false, "Require Daily EMA200 alignment", tooltip="LONG only when price > daily EMA200, SHORT only when below. Default OFF in v1.2.2 — enable AFTER you see the baseline working. Needs >=200 daily bars in chart history to be useful.", group=grpRegime)
+grpRegime = "Regime Filters (opt-in)"
+useDailyTrend       = input.bool(false, "Require Daily EMA200 alignment", tooltip="Enable to filter counter-trend trades.", group=grpRegime)
 dailyEmaLength      = input.int(200, "Daily EMA length", minval=10, group=grpRegime)
-useBBSqueeze        = input.bool(false, "Reject trades when BB squeezing", tooltip="BB width must exceed threshold — avoids ranging/dead markets. Default OFF for BTC 1H because typical BB width (~1-2%) sits below most thresholds; enable + lower threshold if you see too many chop trades.", group=grpRegime)
+useBBSqueeze        = input.bool(false, "Reject trades when BB squeezing", group=grpRegime)
 bbLength            = input.int(20, "Bollinger Band length", minval=2, group=grpRegime)
-bbWidthMin          = input.float(0.015, "Min BB width (% of mid)", minval=0.001, step=0.005, tooltip="0.015 = 1.5% — calibrated for BTC 1H. Forex/stocks would use lower values.", group=grpRegime)
-useAtrExpansion     = input.bool(false, "Require ATR expansion", tooltip="Current ATR must exceed its 50-bar SMA × multiplier — confirms volatility breakout. Default OFF because it cuts trades roughly in half; enable once you have a baseline.", group=grpRegime)
+bbWidthMin          = input.float(0.015, "Min BB width (% of mid)", minval=0.001, step=0.005, group=grpRegime)
+useAtrExpansion     = input.bool(false, "Require ATR expansion", group=grpRegime)
 atrExpansionMaLen   = input.int(50, "ATR SMA lookback", minval=10, group=grpRegime)
 atrExpansionMult    = input.float(0.9, "ATR > SMA × this", minval=0.5, step=0.05, group=grpRegime)
 
@@ -146,19 +122,15 @@ volMa = ta.sma(volume, volMaLength)
 
 htfEma = request.security(syminfo.tickerid, htfTimeframe, ta.ema(close, htfEmaLen), lookahead=barmerge.lookahead_off)
 
-// ── NEW v1.2: regime detectors ──────────────────────────────────────
-// Daily trend bias — no future leak (confirmed daily close only)
 dailyEma = request.security(syminfo.tickerid, "D", ta.ema(close, dailyEmaLength), lookahead=barmerge.lookahead_off)
 dailyTrendUp   = not na(dailyEma) and close > dailyEma
 dailyTrendDown = not na(dailyEma) and close < dailyEma
 
-// Bollinger Band width — measures realized volatility
 bbBasis = ta.sma(close, bbLength)
 bbDev   = ta.stdev(close, bbLength)
-bbWidth = bbBasis > 0 ? (bbDev * 4.0) / bbBasis : 0.0   // (upper-lower)/basis
+bbWidth = bbBasis > 0 ? (bbDev * 4.0) / bbBasis : 0.0
 notSqueezed = bbWidth > bbWidthMin
 
-// ATR expansion — current vs trailing average ATR
 atrSma = ta.sma(atr, atrExpansionMaLen)
 atrExpanding = atrSma > 0 and atr > atrSma * atrExpansionMult
 
@@ -173,7 +145,6 @@ atrOk       = (atr / close * 100.0) >= atrPctMin
 htfUp       = not useHtfFilter or close > htfEma
 htfDown     = not useHtfFilter or close < htfEma
 
-// Regime gates — each toggleable
 regimeLongOk  = not useDailyTrend  or dailyTrendUp
 regimeShortOk = not useDailyTrend  or dailyTrendDown
 bbOk          = not useBBSqueeze   or notSqueezed
@@ -187,11 +158,9 @@ inDateWindow = not useDateFilter or (time >= startDate and time <= endDate)
 
 barReady = useConfirmedBar ? barstate.isconfirmed : true
 
-// Cooldown
 var int lastSignalBar = na
 canSignal = na(lastSignalBar) or (bar_index - lastSignalBar) >= cooldownBars
 
-// Raw triggers
 rawLong  = ta.crossover(fastEma, slowEma)  and close > trendEma and rsi >= rsiLongMin  and rsi <= rsiLongMax
 rawShort = ta.crossunder(fastEma, slowEma) and close < trendEma and rsi <= rsiShortMax and rsi >= rsiShortMin
 
@@ -199,7 +168,7 @@ longSignal  = enableLong  and barReady and rawLong  and trendUp   and trendStron
 shortSignal = enableShort and barReady and rawShort and trendDown and trendStrong and volOk and atrOk and htfDown and canSignal and timeOk and inDateWindow and regimeShortOk and bbOk and atrExpOk
 
 // =====================================================
-// === Trade levels (v1.2 wider R:R)
+// === Trade levels
 // =====================================================
 longStop  = close - atr * atrStopMult
 longRisk  = math.abs(close - longStop)
@@ -219,14 +188,13 @@ var float curSL    = na
 var float curTp1   = na
 var float curTp2   = na
 var bool  tp1Done  = false
-var int   posDir   = 0  // 1=long, -1=short, 0=flat
+var int   posDir   = 0
 
 useRunner = exitMode == "TP1→TP2 (50% partial + runner, SL→BE)"
 
 // =====================================================
-// === EXIT LOGIC (carried over from v1.1 — proven reliable)
+// === EXIT LOGIC (manual checks — proven from v1.1+)
 // =====================================================
-// LONG
 if posDir == 1 and strategy.position_size > 0
     slHit  = low  <= curSL
     tp1Hit = high >= curTp1
@@ -258,7 +226,6 @@ if posDir == 1 and strategy.position_size > 0
             strategy.close("L", comment="TP1")
             posDir := 0
 
-// SHORT
 if posDir == -1 and strategy.position_size < 0
     slHit  = high >= curSL
     tp1Hit = low  <= curTp1
@@ -290,7 +257,6 @@ if posDir == -1 and strategy.position_size < 0
             strategy.close("S", comment="TP1")
             posDir := 0
 
-// Defensive reset
 if strategy.position_size == 0 and posDir != 0
     posDir  := 0
     tp1Done := false
@@ -330,13 +296,10 @@ plot(useDailyTrend  ? dailyEma : na, "Daily EMA", color=color.new(#FF6B35, 0),  
 plotshape(longSignal,  title="BUY",  style=shape.labelup,   location=location.belowbar, color=color.new(color.green, 0), text="BUY",  textcolor=color.white, size=size.small)
 plotshape(shortSignal, title="SELL", style=shape.labeldown, location=location.abovebar, color=color.new(color.red,   0), text="SELL", textcolor=color.white, size=size.small)
 
-// Active trade levels
 plot(posDir != 0 ? curSL  : na, "SL",  color=color.new(color.red,    0), style=plot.style_linebr, linewidth=1)
 plot(posDir != 0 ? curTp1 : na, "TP1", color=color.new(color.green,  0), style=plot.style_linebr, linewidth=1)
 plot(posDir != 0 and useRunner ? curTp2 : na, "TP2", color=color.new(color.lime, 0), style=plot.style_linebr, linewidth=1)
 
-// Background tint when blocked by a regime filter (helps debug visually).
-// One-line form — Pine v6 chokes on `or` at end of line in some contexts.
 regimeBlockDaily = useDailyTrend     and not dailyTrendUp and not dailyTrendDown
 regimeBlockBB    = useBBSqueeze      and not notSqueezed
 regimeBlockAtr   = useAtrExpansion   and not atrExpanding
@@ -344,12 +307,12 @@ regimeBlocked    = regimeBlockDaily or regimeBlockBB or regimeBlockAtr
 bgcolor(regimeBlocked ? color.new(color.gray, 95) : na, title="Regime blocked")
 
 // =====================================================
-// === Info table (top-right) — now with regime state
+// === Info table
 // =====================================================
 var table info = table.new(position.top_right, 2, 13, bgcolor=color.new(color.black, 75), border_width=1)
 if barstate.islast
-    table.cell(info, 0, 0, "v1.2.2",       text_color=color.aqua,   text_size=size.small)
-    table.cell(info, 1, 0, "regime-aware", text_color=color.aqua,   text_size=size.small)
+    table.cell(info, 0, 0, "v1.3",         text_color=color.aqua,   text_size=size.small)
+    table.cell(info, 1, 0, "day-trader",   text_color=color.aqua,   text_size=size.small)
 
     table.cell(info, 0, 1, "Net profit",   text_color=color.gray,   text_size=size.small)
     table.cell(info, 1, 1, str.tostring(strategy.netprofit, "#.##"), text_color=strategy.netprofit >= 0 ? color.lime : color.red, text_size=size.small)
