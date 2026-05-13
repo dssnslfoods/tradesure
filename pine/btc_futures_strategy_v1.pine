@@ -1,6 +1,17 @@
 //@version=6
 // =====================================================
-// BTC Futures Strategy v1.2 — Phase 2 (regime filter + wider R:R)
+// BTC Futures Strategy v1.2.1 — Phase 2 (relaxed defaults for BTC 1H)
+//
+// v1.2.1 (May 13, 2026): Same logic as v1.2 but with BTC-1H-calibrated
+// defaults so the strategy actually fires trades out of the box.
+// Changes from v1.2:
+//   - useBBSqueeze       default ON → OFF   (1H BB width often < 2%, too restrictive)
+//   - useAtrExpansion    default ON → OFF   (cuts trade count ~50%, enable for fine-tune)
+//   - bbWidthMin         0.030 → 0.015      (3% → 1.5% — realistic for 1H crypto)
+//   - atrExpansionMult   1.0 → 0.9          (lenient — current ATR ≥ 90% of SMA)
+//   - adxMin             22 → 20            (slightly lower threshold)
+// useDailyTrend stays ON — it's the single most important regime filter
+// and the lowest-cost in terms of trade count reduction.
 //
 // v1.2 (May 13, 2026): Built on top of v1.1's bullet-proof exit logic,
 // this version adds three regime detectors that prevent the strategy from
@@ -32,7 +43,7 @@
 // Live production still uses btc_futures_signal_v2.pine (indicator) for
 // the webhook. This file is purely for backtest validation.
 // =====================================================
-strategy("BTC Futures Strategy v1.2 (backtest)",
+strategy("BTC Futures Strategy v1.2.1 (backtest)",
      overlay=true,
      initial_capital=10000,
      default_qty_type=strategy.percent_of_equity,
@@ -71,7 +82,7 @@ exitMode       = input.string("TP1→TP2 (50% partial + runner, SL→BE)",
 
 grpFilter = "Quality Filters"
 adxLength      = input.int(14,   "ADX length", minval=1, group=grpFilter)
-adxMin         = input.float(22.0, "ADX minimum (v1.2: 22)", minval=0, group=grpFilter)
+adxMin         = input.float(20.0, "ADX minimum (v1.2.1: 20)", minval=0, group=grpFilter)
 trendSlopeBars = input.int(10,   "Trend EMA slope lookback bars",  minval=1, group=grpFilter)
 volMaLength    = input.int(20,   "Volume MA length", minval=1, group=grpFilter)
 volMult        = input.float(1.0, "Volume must exceed MA × this",  minval=0.0, step=0.1, group=grpFilter)
@@ -86,14 +97,14 @@ blockHours     = input.string("13,14,16,17,20", "Blocked hours (comma list, 0-23
 
 // ── NEW in v1.2: Regime filters ─────────────────────────────────────
 grpRegime = "Regime Filters (v1.2)"
-useDailyTrend       = input.bool(true,  "Require Daily EMA200 alignment", tooltip="LONG only when price > daily EMA200, SHORT only when below. Eliminates counter-trend trades.", group=grpRegime)
+useDailyTrend       = input.bool(true,  "Require Daily EMA200 alignment", tooltip="LONG only when price > daily EMA200, SHORT only when below. Eliminates counter-trend trades. KEEP ON — this is the highest-leverage filter.", group=grpRegime)
 dailyEmaLength      = input.int(200, "Daily EMA length", minval=10, group=grpRegime)
-useBBSqueeze        = input.bool(true,  "Reject trades when BB squeezing", tooltip="BB width must exceed threshold — avoids ranging/dead markets.", group=grpRegime)
+useBBSqueeze        = input.bool(false, "Reject trades when BB squeezing", tooltip="BB width must exceed threshold — avoids ranging/dead markets. Default OFF for BTC 1H because typical BB width (~1-2%) sits below most thresholds; enable + lower threshold if you see too many chop trades.", group=grpRegime)
 bbLength            = input.int(20, "Bollinger Band length", minval=2, group=grpRegime)
-bbWidthMin          = input.float(0.030, "Min BB width (% of mid)", minval=0.001, step=0.005, tooltip="0.03 = 3% — below this we assume ranging market", group=grpRegime)
-useAtrExpansion     = input.bool(true,  "Require ATR expansion", tooltip="Current ATR must exceed its 50-bar SMA — confirms volatility breakout.", group=grpRegime)
+bbWidthMin          = input.float(0.015, "Min BB width (% of mid)", minval=0.001, step=0.005, tooltip="0.015 = 1.5% — calibrated for BTC 1H. Forex/stocks would use lower values.", group=grpRegime)
+useAtrExpansion     = input.bool(false, "Require ATR expansion", tooltip="Current ATR must exceed its 50-bar SMA × multiplier — confirms volatility breakout. Default OFF because it cuts trades roughly in half; enable once you have a baseline.", group=grpRegime)
 atrExpansionMaLen   = input.int(50, "ATR SMA lookback", minval=10, group=grpRegime)
-atrExpansionMult    = input.float(1.0, "ATR > SMA × this", minval=0.5, step=0.05, group=grpRegime)
+atrExpansionMult    = input.float(0.9, "ATR > SMA × this", minval=0.5, step=0.05, group=grpRegime)
 
 grpRun = "Execution"
 enableLong  = input.bool(true,  "Enable LONG (BUY) trades",  group=grpRun)
@@ -321,7 +332,7 @@ bgcolor(regimeBlocked ? color.new(color.gray, 95) : na, title="Regime blocked")
 // =====================================================
 var table info = table.new(position.top_right, 2, 13, bgcolor=color.new(color.black, 75), border_width=1)
 if barstate.islast
-    table.cell(info, 0, 0, "v1.2",         text_color=color.aqua,   text_size=size.small)
+    table.cell(info, 0, 0, "v1.2.1",       text_color=color.aqua,   text_size=size.small)
     table.cell(info, 1, 0, "regime-aware", text_color=color.aqua,   text_size=size.small)
 
     table.cell(info, 0, 1, "Net profit",   text_color=color.gray,   text_size=size.small)
