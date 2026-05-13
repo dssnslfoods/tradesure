@@ -92,7 +92,7 @@ export default async function SchedulePage() {
   const [config, runs, queuedCount, apiKeys, telegramContactCount, totalSignals] =
     await Promise.all([
       getScheduleConfig(),
-      listRecentRuns(20),
+      listRecentRuns(10),
       countQueuedSignals(),
       getMaskedApiKeys(),
       countTelegramContacts(),
