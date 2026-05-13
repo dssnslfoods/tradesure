@@ -1,17 +1,33 @@
 //@version=6
 // =====================================================
-// BTC Futures Strategy v1.2.1 — Phase 2 (relaxed defaults for BTC 1H)
+// BTC Futures Strategy v1.2.2 — Phase 2 (baseline-friendly defaults)
 //
-// v1.2.1 (May 13, 2026): Same logic as v1.2 but with BTC-1H-calibrated
-// defaults so the strategy actually fires trades out of the box.
-// Changes from v1.2:
-//   - useBBSqueeze       default ON → OFF   (1H BB width often < 2%, too restrictive)
-//   - useAtrExpansion    default ON → OFF   (cuts trade count ~50%, enable for fine-tune)
-//   - bbWidthMin         0.030 → 0.015      (3% → 1.5% — realistic for 1H crypto)
-//   - atrExpansionMult   1.0 → 0.9          (lenient — current ATR ≥ 90% of SMA)
-//   - adxMin             22 → 20            (slightly lower threshold)
-// useDailyTrend stays ON — it's the single most important regime filter
-// and the lowest-cost in terms of trade count reduction.
+// v1.2.2 (May 13, 2026): v1.2.1 still produced 0 trades for some users
+// because TradingView's data window on 1H charts often doesn't include
+// 200+ confirmed daily bars, which leaves the daily EMA200 partial and
+// the Daily-trend filter rejects everything. v1.2.2 flips ALL three
+// regime filters OFF by default so the strategy fires out of the box
+// (matching v1.1's entry profile) and the user can opt-in to each
+// filter one at a time to measure its impact.
+//
+// Changes from v1.2.1:
+//   - useDailyTrend      default ON → OFF   (needs >=200 days history; safer off)
+//   - All other defaults unchanged
+//
+// Recommended testing order after you see the baseline working:
+//   1. Enable useDailyTrend alone → expect fewer trades, higher win rate
+//   2. + useAtrExpansion           → ~50% fewer trades, cleaner setups
+//   3. + useBBSqueeze              → most strict, opt-in for chop avoidance
+//
+// What v1.2.x keeps from v1.1 baseline:
+//   - Manual exit logic (no Pine engine bugs)
+//   - 25% of equity position size (no margin calls)
+//
+// What v1.2.x added:
+//   - Wider R:R (SL 2.5 ATR, TP1 1.5R, TP2 3R)
+//   - Longer cooldown (3 → 8 bars)
+//   - ADX min raised slightly (17 → 20)
+//   - Three opt-in regime filters (Daily EMA200, BB squeeze, ATR expansion)
 //
 // v1.2 (May 13, 2026): Built on top of v1.1's bullet-proof exit logic,
 // this version adds three regime detectors that prevent the strategy from
@@ -43,7 +59,7 @@
 // Live production still uses btc_futures_signal_v2.pine (indicator) for
 // the webhook. This file is purely for backtest validation.
 // =====================================================
-strategy("BTC Futures Strategy v1.2.1 (backtest)",
+strategy("BTC Futures Strategy v1.2.2 (backtest)",
      overlay=true,
      initial_capital=10000,
      default_qty_type=strategy.percent_of_equity,
@@ -97,7 +113,7 @@ blockHours     = input.string("13,14,16,17,20", "Blocked hours (comma list, 0-23
 
 // ── NEW in v1.2: Regime filters ─────────────────────────────────────
 grpRegime = "Regime Filters (v1.2)"
-useDailyTrend       = input.bool(true,  "Require Daily EMA200 alignment", tooltip="LONG only when price > daily EMA200, SHORT only when below. Eliminates counter-trend trades. KEEP ON — this is the highest-leverage filter.", group=grpRegime)
+useDailyTrend       = input.bool(false, "Require Daily EMA200 alignment", tooltip="LONG only when price > daily EMA200, SHORT only when below. Default OFF in v1.2.2 — enable AFTER you see the baseline working. Needs >=200 daily bars in chart history to be useful.", group=grpRegime)
 dailyEmaLength      = input.int(200, "Daily EMA length", minval=10, group=grpRegime)
 useBBSqueeze        = input.bool(false, "Reject trades when BB squeezing", tooltip="BB width must exceed threshold — avoids ranging/dead markets. Default OFF for BTC 1H because typical BB width (~1-2%) sits below most thresholds; enable + lower threshold if you see too many chop trades.", group=grpRegime)
 bbLength            = input.int(20, "Bollinger Band length", minval=2, group=grpRegime)
@@ -332,7 +348,7 @@ bgcolor(regimeBlocked ? color.new(color.gray, 95) : na, title="Regime blocked")
 // =====================================================
 var table info = table.new(position.top_right, 2, 13, bgcolor=color.new(color.black, 75), border_width=1)
 if barstate.islast
-    table.cell(info, 0, 0, "v1.2.1",       text_color=color.aqua,   text_size=size.small)
+    table.cell(info, 0, 0, "v1.2.2",       text_color=color.aqua,   text_size=size.small)
     table.cell(info, 1, 0, "regime-aware", text_color=color.aqua,   text_size=size.small)
 
     table.cell(info, 0, 1, "Net profit",   text_color=color.gray,   text_size=size.small)
