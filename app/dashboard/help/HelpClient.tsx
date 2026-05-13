@@ -611,6 +611,69 @@ const ADMIN_SECTIONS: Section[] = [
     ],
   },
   {
+    id: "a-multi-symbol",
+    title: "Multi-Symbol Support",
+    icon: "flame",
+    intro:
+      "ระบบรองรับหลายเหรียญพร้อมกันออกแบบมาตั้งแต่ต้น — Pine + Webhook + AI + Dashboard ใช้ symbol field จาก payload เลย ไม่ผูกกับ BTC. เพิ่มเหรียญใหม่ใช้เวลา ~5 นาที",
+    steps: [
+      {
+        title: "เปิดกราฟเหรียญใหม่ใน TradingView",
+        icon: "chart-candle",
+        body: "เช่น ETHUSDT, SOLUSDT, BNBUSDT (Binance Spot หรือ Perp) — timeframe ที่ต้องการ (1H แนะนำ)",
+      },
+      {
+        title: "Add Indicator v2.1 to chart",
+        icon: "plus",
+        body: "Pine Editor → btc_futures_signal_v2.pine → Add to chart · ตั้ง Inputs เหมือนกราฟ BTC (รวม Daily filter ถ้าใช้)",
+      },
+      {
+        title: "Create Alert ใหม่สำหรับเหรียญนี้",
+        icon: "bell",
+        body: "Right-click → Add alert · Condition = indicator v2.1 · Sub = 'Any alert() function call' · Webhook URL = เดิม (เดียวกับ BTC) · Message: เว้นว่าง · Create",
+      },
+      {
+        title: "ตรวจ Dashboard",
+        icon: "dashboard",
+        body: "หลัง candle ถัดไปปิด → จะเห็น card ของเหรียญใหม่ + symbol filter chip โผล่ขึ้นมาที่ดด้านบน (เฉพาะเมื่อมี ≥ 2 เหรียญ)",
+      },
+      {
+        title: "Per-symbol filter + stats",
+        icon: "filter",
+        body: "Filter chip แต่ละเหรียญแสดง: จำนวน signals + win rate · คลิกเพื่อกรองดูเฉพาะเหรียญนั้น",
+      },
+    ],
+    callouts: [
+      {
+        tone: "info",
+        icon: "info",
+        text: (
+          <>
+            <strong>Webhook URL เดียวกันใช้ได้ทุกเหรียญ</strong> — payload ของ Pine มี symbol field อยู่แล้ว ระบบใช้แยก signal เอง
+          </>
+        ),
+      },
+      {
+        tone: "warn",
+        icon: "alert-triangle",
+        text: (
+          <>
+            <strong>Cost & rate-limit considerations:</strong> ทุกเหรียญส่ง NO_TRADE heartbeat ทุกชั่วโมง — N เหรียญ = N × 24 messages/วัน · AI cost คูณตามจำนวน webhook ที่ผ่าน gate · ตั้ง <code>NOTRADE_TELEGRAM=0</code> ใน env ถ้า spam
+          </>
+        ),
+      },
+      {
+        tone: "buy",
+        icon: "circle-check",
+        text: (
+          <>
+            <strong>เหรียญที่แนะนำ:</strong> เริ่มจาก ETHUSDT, SOLUSDT, BNBUSDT (blue-chip, liquid) ก่อนค่อยลอง alt
+          </>
+        ),
+      },
+    ],
+  },
+  {
     id: "a-filters",
     title: "Filters & Environment Variables",
     icon: "filter",

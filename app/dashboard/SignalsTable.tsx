@@ -59,11 +59,28 @@ export default function SignalsTable({
   const [pending, start] = useTransition();
   const [editing, setEditing] = useState<SignalRow | null>(null);
   const [filter, setFilter] = useState<FilterKey>("all");
+  const [symbolFilter, setSymbolFilter] = useState<string>("all");
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [page, setPage] = useState(0);
 
+  // Unique symbols across all rows — sorted alphabetically so the filter is
+  // stable as new symbols come in. We only render the symbol selector when
+  // there are 2+, otherwise the row is noise for single-symbol users.
+  const uniqueSymbols = useMemo(() => {
+    return Array.from(new Set(rows.map((r) => r.symbol))).sort();
+  }, [rows]);
+
   const filterMatch = FILTERS.find((f) => f.key === filter)!;
-  const visible = useMemo(() => rows.filter((r) => filterMatch.match(r)), [rows, filterMatch]);
+  // Apply BOTH filters — outcome filter (chips) and symbol filter (dropdown).
+  const visible = useMemo(
+    () =>
+      rows.filter(
+        (r) =>
+          filterMatch.match(r) &&
+          (symbolFilter === "all" || r.symbol === symbolFilter)
+      ),
+    [rows, filterMatch, symbolFilter]
+  );
 
   // Pagination
   const totalPages = Math.max(1, Math.ceil(visible.length / PAGE_SIZE));
@@ -72,18 +89,24 @@ export default function SignalsTable({
   const pageEnd = pageStart + PAGE_SIZE;
   const pageItems = visible.slice(pageStart, pageEnd);
 
-  // Reset to first page when filter changes
+  // Reset to first page when any filter changes
   useEffect(() => {
     setPage(0);
-  }, [filter]);
+  }, [filter, symbolFilter]);
 
+  // Outcome chip counts reflect the CURRENT symbol filter so the numbers
+  // beside each chip match what the user would see after clicking it.
+  const symbolFiltered = useMemo(
+    () => (symbolFilter === "all" ? rows : rows.filter((r) => r.symbol === symbolFilter)),
+    [rows, symbolFilter]
+  );
   const counts: Record<FilterKey, number> = {
-    all: rows.length,
-    open: rows.filter((r) => r.outcome === "OPEN" || r.outcome === "PENDING").length,
-    queued: rows.filter((r) => r.outcome === "QUEUED").length,
-    wins: rows.filter((r) => r.outcome === "WIN_TP1" || r.outcome === "WIN_TP2").length,
-    losses: rows.filter((r) => r.outcome === "LOSS_SL").length,
-    skip: rows.filter(isSkipped).length,
+    all: symbolFiltered.length,
+    open: symbolFiltered.filter((r) => r.outcome === "OPEN" || r.outcome === "PENDING").length,
+    queued: symbolFiltered.filter((r) => r.outcome === "QUEUED").length,
+    wins: symbolFiltered.filter((r) => r.outcome === "WIN_TP1" || r.outcome === "WIN_TP2").length,
+    losses: symbolFiltered.filter((r) => r.outcome === "LOSS_SL").length,
+    skip: symbolFiltered.filter(isSkipped).length,
   };
 
   // Mark "new" signals as those created in last hour
@@ -103,7 +126,70 @@ export default function SignalsTable({
 
   return (
     <div>
-      {/* Filter toolbar */}
+      {/* Symbol filter — only shown when 2+ unique symbols are tracked */}
+      {uniqueSymbols.length >= 2 && (
+        <div className="mb-3 flex flex-wrap items-center gap-2 overflow-x-auto pb-1">
+          <span className="text-[11px] uppercase tracking-eyebrow text-ink-muted">
+            เหรียญ:
+          </span>
+          <button
+            type="button"
+            onClick={() => setSymbolFilter("all")}
+            className={`chip !text-[11px] transition ${
+              symbolFilter === "all"
+                ? "!bg-brand/15 !text-brand !border-brand/40"
+                : "hover:!bg-surface-2 hover:!text-ink-primary"
+            }`}
+          >
+            ทั้งหมด
+            <span className="ml-1 rounded bg-black/30 px-1.5 py-0.5 text-[9px] font-bold text-ink-muted">
+              {rows.length}
+            </span>
+          </button>
+          {uniqueSymbols.map((sym) => {
+            const symCount = rows.filter((r) => r.symbol === sym).length;
+            const symWins = rows.filter(
+              (r) => r.symbol === sym && (r.outcome === "WIN_TP1" || r.outcome === "WIN_TP2")
+            ).length;
+            const symLosses = rows.filter((r) => r.symbol === sym && r.outcome === "LOSS_SL").length;
+            const decided = symWins + symLosses;
+            const symWinRate = decided > 0 ? Math.round((symWins / decided) * 100) : null;
+            return (
+              <button
+                key={sym}
+                type="button"
+                onClick={() => setSymbolFilter(sym)}
+                className={`chip !text-[11px] transition ${
+                  symbolFilter === sym
+                    ? "!bg-brand/15 !text-brand !border-brand/40"
+                    : "hover:!bg-surface-2 hover:!text-ink-primary"
+                }`}
+                title={
+                  symWinRate !== null
+                    ? `${symWins}W / ${symLosses}L · ${symWinRate}% win rate`
+                    : `${symCount} signals`
+                }
+              >
+                {sym}
+                <span className="ml-1 rounded bg-black/30 px-1.5 py-0.5 text-[9px] font-bold text-ink-muted">
+                  {symCount}
+                </span>
+                {symWinRate !== null && (
+                  <span
+                    className={`ml-1 text-[9px] font-bold ${
+                      symWinRate >= 50 ? "text-sig-buy" : "text-sig-sell"
+                    }`}
+                  >
+                    {symWinRate}%
+                  </span>
+                )}
+              </button>
+            );
+          })}
+        </div>
+      )}
+
+      {/* Outcome filter toolbar */}
       <div className="mb-5 flex flex-wrap items-center gap-2 overflow-x-auto pb-1">
         {FILTERS.map((f) => (
           <button
