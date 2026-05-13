@@ -308,10 +308,12 @@ plot(posDir != 0 ? curSL  : na, "SL",  color=color.new(color.red,    0), style=p
 plot(posDir != 0 ? curTp1 : na, "TP1", color=color.new(color.green,  0), style=plot.style_linebr, linewidth=1)
 plot(posDir != 0 and useRunner ? curTp2 : na, "TP2", color=color.new(color.lime, 0), style=plot.style_linebr, linewidth=1)
 
-// Background tint when blocked by a regime filter (helps debug visually)
-regimeBlocked = (useDailyTrend and not dailyTrendUp and not dailyTrendDown) or
-                (useBBSqueeze and not notSqueezed) or
-                (useAtrExpansion and not atrExpanding)
+// Background tint when blocked by a regime filter (helps debug visually).
+// One-line form — Pine v6 chokes on `or` at end of line in some contexts.
+regimeBlockDaily = useDailyTrend     and not dailyTrendUp and not dailyTrendDown
+regimeBlockBB    = useBBSqueeze      and not notSqueezed
+regimeBlockAtr   = useAtrExpansion   and not atrExpanding
+regimeBlocked    = regimeBlockDaily or regimeBlockBB or regimeBlockAtr
 bgcolor(regimeBlocked ? color.new(color.gray, 95) : na, title="Regime blocked")
 
 // =====================================================
