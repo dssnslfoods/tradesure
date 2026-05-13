@@ -86,12 +86,17 @@ const USER_SECTIONS: Section[] = [
       {
         title: "Filter chips",
         icon: "filter",
-        body: "All / Open / Wins / Losses / No Trade — กดเพื่อกรอง signal ตาม outcome",
+        body: "All / Open / Queued / Wins / Losses / No Trade — กดเพื่อกรอง signal ตาม outcome",
       },
       {
         title: "Trade card",
         icon: "chart-candle",
         body: "แต่ละการ์ดแสดง: symbol + price + AI bias + R:R + ระดับ Entry/SL/TP1/TP2 + outcome + PnL",
+      },
+      {
+        title: "Auto-archive",
+        icon: "eye-off",
+        body: "Card ที่จบแล้ว (WIN/LOSS/SKIP) เก่ากว่า N วัน (default 7) จะถูกซ่อนจาก grid — แต่ data ใน DB และ analytics ยังครบ",
       },
     ],
     callouts: [
@@ -107,10 +112,73 @@ const USER_SECTIONS: Section[] = [
     ],
   },
   {
+    id: "u-outcomes",
+    title: "อ่าน Outcome chips",
+    icon: "filter",
+    intro: "Chip มุมขวาบนของ card บอกสถานะของ signal · มีหลายแบบ",
+    table: {
+      headers: ["Chip", "ความหมาย", "Telegram?"],
+      rows: [
+        [
+          <span key="pending" className="chip chip-mute !text-[10px]">Pending</span>,
+          "Signal ใหม่ รอ backtest cron ตรวจผล",
+          "✅ ส่งแล้ว",
+        ],
+        [
+          <span key="open" className="chip chip-info !text-[10px]">Open</span>,
+          "Backtest แล้ว แต่ราคายังไม่แตะ TP/SL",
+          "✅ ส่งแล้ว",
+        ],
+        [
+          <span key="win1" className="chip chip-buy !text-[10px]">TP1 hit</span>,
+          "ราคาแตะ TP1 — ปิดกำไรขั้นแรก",
+          "✅ ส่งแล้ว",
+        ],
+        [
+          <span key="win2" className="chip chip-buy !text-[10px]">TP2 hit</span>,
+          "ราคาแตะ TP2 — กำไรเต็มไม้",
+          "✅ ส่งแล้ว",
+        ],
+        [
+          <span key="loss" className="chip chip-sell !text-[10px]">SL hit</span>,
+          "ราคาแตะ SL — ขาดทุน",
+          "✅ ส่งแล้ว",
+        ],
+        [
+          <span key="queued" className="chip chip-info !text-[10px]">Queued</span>,
+          "AI active schedule กำลังหลับ → รอ admin process",
+          "❌ ไม่ส่ง",
+        ],
+        [
+          <span key="lowconf" className="chip chip-warn !text-[10px]">Low conf</span>,
+          "AI confidence < 70% (MIN_CONFIDENCE)",
+          "❌ ไม่ส่ง",
+        ],
+        [
+          <span key="offhour" className="chip chip-warn !text-[10px]">Off-hour</span>,
+          "ชั่วโมง win rate ต่ำ (post-filter)",
+          "❌ ไม่ส่ง",
+        ],
+        [
+          <span key="notrade" className="chip chip-warn !text-[10px]">No Trade</span>,
+          "AI แนะนำ WAIT (regime ไม่เหมาะ)",
+          "✅ ส่ง NO TRADE",
+        ],
+      ],
+    },
+    callouts: [
+      {
+        tone: "info",
+        icon: "info",
+        text: "Card ที่ outcome เป็น Queued / Low conf / Off-hour / No Trade ไม่นับใน Win rate (รวมเฉพาะ TP1/TP2/SL hit เท่านั้น)",
+      },
+    ],
+  },
+  {
     id: "u-bias",
-    title: "อ่าน AI bias",
+    title: "อ่าน AI bias + Confidence",
     icon: "robot",
-    intro: "AI วิเคราะห์ทุก signal และให้คำแนะนำ 3 แบบ:",
+    intro: "AI วิเคราะห์ทุก signal และให้คำแนะนำ 3 แบบ พร้อมคะแนนความมั่นใจ",
     table: {
       headers: ["Bias", "ความหมาย", "ควรทำอะไร"],
       rows: [
@@ -133,14 +201,94 @@ const USER_SECTIONS: Section[] = [
     },
     callouts: [
       {
+        tone: "info",
+        icon: "target",
+        text: (
+          <>
+            <strong>Confidence Bar:</strong> สีเขียวยาว = AI มั่นใจ · สั้น/เหลือง = ระวัง
+            · ระบบกรองสัญญาณที่ confidence &lt; 70% ออกอัตโนมัติ
+          </>
+        ),
+      },
+      {
         tone: "warn",
         icon: "alert-triangle",
         text: "Signal ที่ AI = WAIT จะส่ง Telegram เป็น 'NO TRADE — ไม่แนะนำให้เข้า' พร้อม banner แดง",
       },
+    ],
+  },
+  {
+    id: "u-telegram",
+    title: "Telegram alerts ที่จะได้รับ",
+    icon: "telegram",
+    intro:
+      "Active user ทุกคนจะได้รับ Telegram alert พร้อมกัน — มี 5 ประเภทหลัก",
+    table: {
+      headers: ["Alert type", "เมื่อไหร่ที่ได้รับ", "ความถี่"],
+      rows: [
+        ["🚨 Signal alert (BUY/SELL)", "TradingView ยิง signal + AI ผ่าน filter ทั้งหมด", "1-3 ครั้ง/วัน"],
+        ["⛔ NO TRADE (WAIT bias)", "AI วิเคราะห์แล้วไม่แนะนำให้เข้า", "1-5 ครั้ง/วัน"],
+        ["🟡 NO_TRADE heartbeat", "ทุก candle close ที่ Pine ไม่มี setup", "~20-22 ครั้ง/วัน"],
+        ["🔥 Top 3 Trending", "เหรียญใหม่เข้า Top 3 hottest", "ทุก 30 นาที"],
+        ["🔐 OTP code", "ตอน login", "ตามที่ขอ"],
+        ["📢 System Status", "Admin กดเปลี่ยน config + broadcast", "เป็นครั้งคราว"],
+      ],
+    },
+    callouts: [
       {
         tone: "info",
+        icon: "info",
+        text: (
+          <>
+            <strong>NO_TRADE heartbeat</strong> ส่งทุกชั่วโมง — เป็น "ระบบยังทำงานปกติ" + บอกเหตุผลที่ไม่เทรด เช่น "ไม่มี EMA cross" / "ADX ต่ำ" / "ชั่วโมงที่ block"
+          </>
+        ),
+      },
+      {
+        tone: "warn",
+        icon: "ban",
+        text: "ถ้าไม่อยากรับ alert ชั่วคราว → admin สามารถ disable account ได้ (account ที่ disabled จะไม่รับ alert + login ไม่ได้)",
+      },
+    ],
+  },
+  {
+    id: "u-message-format",
+    title: "เนื้อหาใน Telegram message",
+    icon: "send",
+    intro:
+      "BUY/SELL signal แต่ละครั้งจะมีข้อมูลครบ — รวมทั้ง Market Context (Macro) ที่ AI ใช้ประกอบการตัดสินใจ",
+    steps: [
+      {
+        title: "Trade plan",
         icon: "target",
-        text: "Confidence สูงกว่า 70% = AI มั่นใจมาก · 50-70% = กลางๆ · ต่ำกว่า 50% = อ่อน",
+        body: "Symbol + Timeframe + Signal direction + ราคาเข้า + Entry zone + SL + TP1 + TP2 (พร้อม %)",
+      },
+      {
+        title: "AI verdict",
+        icon: "robot",
+        body: "Bias (LONG/SHORT/WAIT) + Confidence % + Risk level + R:R ratio",
+      },
+      {
+        title: "AI reasoning",
+        icon: "chart-line",
+        body: "สรุปสั้นๆ ภาษาไทยว่าทำไม AI เห็นด้วย/ไม่เห็นด้วย + checklist ที่ผ่าน",
+      },
+      {
+        title: "Second opinion (ถ้าเปิด Compare/Vote mode)",
+        icon: "device-analytics",
+        body: "AI ตัวที่ 2 (เช่น Gemini) วิเคราะห์ด้วย — ✅ agree หรือ ❌ disagree พร้อม confidence",
+      },
+      {
+        title: "Market Context",
+        icon: "trending-up",
+        body: "Fear & Greed Index + BTC Dominance + Funding Rate (8h) — macro overview ตอนสัญญาณเกิด",
+      },
+    ],
+    callouts: [
+      {
+        tone: "info",
+        icon: "info",
+        text: "Funding > +0.05% = longs crowded (ระวัง long squeeze) · Funding < -0.05% = shorts crowded · Fear & Greed > 75 = extreme greed (ระวัง top)",
       },
     ],
   },
@@ -193,40 +341,31 @@ const USER_SECTIONS: Section[] = [
         body: "Total · Decided · Win rate · Total PnL · Avg PnL · Profit factor · Best/Worst trade · Avg R:R · Max drawdown · Win/Loss streak",
       },
       {
-        title: "Charts",
+        title: "Equity curve",
         icon: "chart-line",
-        body: "Equity curve · Outcome donut · Daily PnL · Rolling win rate · Top symbols · By timeframe · Confidence vs Win rate · Hour-of-day heatmap",
+        body: "Cumulative P&L over time — เห็นว่าระบบกำลังขึ้น/ลง / sideways",
+      },
+      {
+        title: "Outcome donut",
+        icon: "chart-line",
+        body: "สัดส่วน TP1/TP2/SL/No Trade — donut chart",
+      },
+      {
+        title: "Hour of day heatmap",
+        icon: "clock",
+        body: "Win rate ในแต่ละชั่วโมง (BKK) — เห็นว่าชั่วโมงไหนเทรดดี/แย่ — ใช้ตัดสินใจ blocked hours",
+      },
+      {
+        title: "Confidence vs Win rate",
+        icon: "target",
+        body: "Histogram — AI confidence buckets vs winrate · ถ้า correlation positive = AI calibrated ดี",
       },
     ],
     callouts: [
       {
         tone: "info",
         icon: "info",
-        text: "ข้อมูลนับเฉพาะ signal ที่ outcome = WIN_TP1 / WIN_TP2 / LOSS_SL · ไม่รวม PENDING / OPEN / NO TRADE",
-      },
-    ],
-  },
-  {
-    id: "u-telegram",
-    title: "Telegram alerts",
-    icon: "telegram",
-    intro:
-      "Active user ทุกคนจะได้รับ Telegram alert พร้อมกัน — ไม่ต้อง config อะไรเพิ่ม",
-    table: {
-      headers: ["Alert type", "เมื่อไหร่ที่ได้รับ"],
-      rows: [
-        ["🚨 Signal alert", "TradingView ยิง signal มา + AI วิเคราะห์เสร็จ"],
-        ["⛔ NO TRADE", "AI วิเคราะห์แล้วไม่แนะนำให้เข้า"],
-        ["🔥 Top 3 newcomer", "ทุก 30 นาที — ถ้ามีเหรียญใหม่เข้า Top 3 hottest"],
-        ["🔐 OTP code", "เฉพาะตอนคุณ login (ส่งให้คนที่ขอเท่านั้น)"],
-        ["👋 Welcome", "เมื่อส่ง /start หา bot ครั้งแรก"],
-      ],
-    },
-    callouts: [
-      {
-        tone: "warn",
-        icon: "ban",
-        text: "ถ้าไม่อยากรับ alert ชั่วคราว → admin สามารถ disable account ได้ (account ที่ disabled จะไม่รับ alert + login ไม่ได้)",
+        text: "ข้อมูลนับเฉพาะ signal ที่ outcome = WIN_TP1 / WIN_TP2 / LOSS_SL · ไม่รวม PENDING / OPEN / NO TRADE / QUEUED / SKIP_*",
       },
     ],
   },
@@ -238,103 +377,297 @@ const ADMIN_SECTIONS: Section[] = [
     title: "Admin overview",
     icon: "shield-check",
     intro:
-      "Admin มีสิทธิ์ทำทุกอย่างที่ user ทำได้ + จัดการระบบ + แก้ไข signal — ระบบป้องกัน self-lockout (admin คนสุดท้าย demote ตัวเองไม่ได้)",
+      "Admin มีสิทธิ์ทำทุกอย่างที่ user ทำได้ + จัดการระบบ + AI config + ปรับ filter — ระบบป้องกัน self-lockout (admin คนสุดท้าย demote ตัวเองไม่ได้)",
     table: {
       headers: ["Feature", "User", "Admin"],
       rows: [
         ["ดู signals + analytics + trending", "✅", "✅"],
         ["Watchlist (ของตัวเอง)", "✅", "✅"],
-        ["Analyze with AI", "✅", "✅"],
         ["รับ Telegram alerts", "✅", "✅"],
         ["Edit SL/TP per signal", "❌", "✅"],
         ["Delete signal (เดี่ยว/รวม)", "❌", "✅"],
         ["Run backtest manually", "❌", "✅"],
         ["Pause/Resume schedule", "❌", "✅"],
+        ["AI model selection", "❌", "✅"],
+        ["AI API key management", "❌", "✅"],
+        ["AI active schedule (multi-window + days)", "❌", "✅"],
+        ["Process queued signals", "❌", "✅"],
+        ["Card retention setting", "❌", "✅"],
+        ["View Configuration (system snapshot)", "❌", "✅"],
+        ["Broadcast Status (system update)", "❌", "✅"],
         ["Manage users (CRUD)", "❌", "✅"],
-        ["Toggle admin role", "❌", "✅"],
         ["Setup Telegram webhook", "❌", "✅"],
-        ["Test broadcast", "❌", "✅"],
       ],
     },
   },
   {
-    id: "a-users",
-    title: "จัดการ Users & Telegram contacts",
-    icon: "users",
-    intro: "ที่หน้า /dashboard/users — สร้าง user ใหม่จาก contact ที่ส่ง /start หา bot",
+    id: "a-schedule-hub",
+    title: "Schedule hub — ศูนย์ควบคุมระบบ",
+    icon: "settings",
+    intro:
+      "ที่หน้า /dashboard/schedule — admin control center รวมทุก setting ของระบบ AI + Filter + Schedule + Broadcast",
     steps: [
       {
-        title: "ผู้ใช้ใหม่ส่ง /start หา bot",
-        icon: "telegram",
-        body: "Bot ตอบกลับพร้อม Chat ID + แจ้ง 'รอ admin อนุมัติ' — contact จะปรากฏในตาราง 'Telegram contacts' ทันที",
+        title: "View Configuration",
+        icon: "eye",
+        body: "ปุ่มมุมขวาบน → modal แสดง config ทั้งระบบใน 6 sections: System / AI / Keys / Schedule / Filters / Connections + ปุ่ม Copy text ส่ง support",
       },
       {
-        title: "Create user จาก contact",
-        icon: "user-plus",
-        body: "ที่ row contact → กด '+ Create user' → ตั้ง username (auto-suggest) + display name + ติ๊ก admin (ถ้าต้องการ) → กด Create",
+        title: "Enable / Pause",
+        icon: "pause",
+        body: "Toggle ระบบ backtest scheduler — ใส่ pause reason ได้",
       },
       {
-        title: "Toggle active/admin",
-        icon: "settings",
-        body: "ที่ตาราง Auth users → คลิก chip 'active' หรือ 'admin' เพื่อ toggle",
+        title: "Card retention",
+        icon: "eye-off",
+        body: "Auto-archive card ที่จบแล้วเก่ากว่า N วัน (default 7) — ข้อมูล DB ยังเก็บครบ analytics ใช้ data เต็ม",
       },
       {
-        title: "ลบ contact",
-        icon: "trash",
-        body: "Contact ที่ไม่ต้องการ → กดถังขยะ (user ที่ผูกอยู่ไม่ถูกลบ FK on delete set null)",
+        title: "Run backtest now",
+        icon: "lightning",
+        body: "Trigger manual — override pause flag",
       },
     ],
     callouts: [
       {
         tone: "info",
         icon: "info",
-        text: "Username pattern: a-z, A-Z, 0-9, _, - · ความยาว 2-40 ตัวอักษร",
-      },
-      {
-        tone: "warn",
-        icon: "shield",
-        text: "Self-lockout protection: deactivate ตัวเองไม่ได้ + demote ตัวเองตอนเป็น admin คนเดียวไม่ได้",
-      },
-      {
-        tone: "buy",
-        icon: "circle-check",
-        text: "Auto-link: ถ้า contact's chat_id ตรงกับ auth_user เก่าอยู่แล้ว → link อัตโนมัติเป็น 'registered'",
+        text: "View Configuration ปลอดภัย — API keys แสดงแค่ mask (sk-Ab…cD12) ไม่มี plaintext ที่ client",
       },
     ],
   },
   {
-    id: "a-webhook",
-    title: "Telegram webhook",
+    id: "a-ai-config",
+    title: "AI Configuration (Multi-provider)",
     icon: "robot",
     intro:
-      "ตั้งค่า webhook ให้ Telegram ส่ง message ทุกอันที่ส่งหา bot มาที่ /api/telegram/bot — ไม่ตั้งจะรับ contact ใหม่ไม่ได้",
+      "ระบบรองรับ OpenAI (GPT) + Google Gemini · admin เลือก model + mode + จัดการ keys ได้จาก dashboard ไม่ต้อง redeploy",
     steps: [
       {
-        title: "Setup ครั้งแรก",
-        icon: "play",
-        body: "ที่ /dashboard/users → panel 'Telegram Bot Webhook' → กด 'Setup webhook' → status เปลี่ยนเป็น Active",
+        title: "AI Model picker",
+        icon: "robot",
+        body: "เลือก primary model จาก dropdown (จัดกลุ่ม OpenAI/Gemini) · กด Save → มีผลทันทีกับ signal ถัดไป",
       },
       {
-        title: "Test broadcast",
+        title: "Dual-model comparison",
+        icon: "device-analytics",
+        body: "3 modes: Single (1 AI) · Compare (รัน 2 AI พร้อมกัน แสดงทั้งคู่) · Vote (ต้อง agree ถึงส่ง Telegram)",
+      },
+      {
+        title: "API key management",
+        icon: "key",
+        body: "ใส่ OpenAI + Gemini keys ตรงๆ ใน dashboard · เก็บใน DB (service-role only) · override env vars · แสดงเฉพาะ mask",
+      },
+    ],
+    table: {
+      headers: ["Model", "Provider", "ราคา/M tokens (in/out)", "ลักษณะ"],
+      rows: [
+        ["gpt-4o-mini ⭐", "OpenAI", "$0.15 / $0.60", "default · เร็ว · ราคาถูก"],
+        ["gpt-4o", "OpenAI", "$2.50 / $10", "ฉลาดกว่า · vision"],
+        ["gpt-4.1-mini", "OpenAI", "$0.40 / $1.60", "ใหม่ · ราคาถูก"],
+        ["gemini-2.5-flash ⭐", "Google", "FREE 1500 req/วัน", "ฟรี! · เร็ว"],
+        ["gemini-2.5-pro", "Google", "$1.25 / $5", "ฉลาดสุดของ Google"],
+      ],
+    },
+    callouts: [
+      {
+        tone: "buy",
+        icon: "info",
+        text: (
+          <>
+            <strong>Best value setup:</strong> Mode Compare · Primary GPT-4o mini · Secondary
+            Gemini 2.5 Flash (FREE) — cost ~$0.60/เดือน ได้ second opinion ฟรีๆ
+          </>
+        ),
+      },
+      {
+        tone: "warn",
+        icon: "alert-triangle",
+        text: "Vote mode strict กว่า — ถ้า 2 model disagree → outcome = SKIP_WAIT (ไม่ส่ง Telegram)",
+      },
+    ],
+  },
+  {
+    id: "a-ai-schedule",
+    title: "AI Active Schedule",
+    icon: "clock",
+    intro:
+      "Admin กำหนดช่วงเวลา + วัน ที่ AI จะวิเคราะห์ — นอกช่วงนี้ webhook ถูกเก็บเป็น Queue รอ admin trigger ภายหลัง · ประหยัด API cost",
+    steps: [
+      {
+        title: "Active days picker",
+        icon: "calendar",
+        body: "7 ปุ่ม อา-จ-อ-พ-พฤ-ศ-ส · click toggle on/off · Save days",
+      },
+      {
+        title: "Hour windows (multi-window)",
+        icon: "clock",
+        body: "เพิ่มได้สูงสุด 8 windows ต่อวัน (BKK time) · เช่น 06-11 + 14-22 · ว่างเปล่า = ทำงาน 24h · start > end = ข้ามคืน",
+      },
+      {
+        title: "Process queued signals",
+        icon: "lightning",
+        body: "Webhook ที่เข้านอกช่วง → outcome=QUEUED · กดปุ่ม Process queue (N) → batch AI วิเคราะห์ทั้งหมด · ส่ง Telegram ที่ผ่าน filter",
+      },
+    ],
+    callouts: [
+      {
+        tone: "info",
+        icon: "info",
+        text: "Active now / Idle now chip บน schedule page โชว์สถานะปัจจุบัน · banner สีเหลืองโผล่ที่ /dashboard เมื่อ AI off-hours",
+      },
+      {
+        tone: "warn",
+        icon: "alert-triangle",
+        text: "NO_TRADE heartbeat ไม่ถูก gate ของ schedule — ยังส่งตามปกติ (ปิดได้ด้วย env NOTRADE_TELEGRAM=0)",
+      },
+    ],
+  },
+  {
+    id: "a-pine-strategy",
+    title: "Pine Scripts — Indicator + Strategy",
+    icon: "chart-candle",
+    intro:
+      "ระบบมี Pine Script 2 ตัว: Indicator v2 (ส่ง webhook live) + Strategy v1.3 (backtest บน TradingView)",
+    steps: [
+      {
+        title: "Indicator v2 (Live)",
         icon: "send",
-        body: "กด 'Test broadcast' → ส่งข้อความทดสอบไปทุก active user เพื่อ verify multi-user delivery",
+        body: "ไฟล์ pine/btc_futures_signal_v2.pine · indicator() declaration · ต้องตั้ง alert webhook · ส่ง JSON payload เข้า /api/webhook/tradingview",
       },
       {
-        title: "Re-register",
+        title: "Strategy v1.3 (Backtest)",
+        icon: "device-analytics",
+        body: "ไฟล์ pine/btc_futures_strategy_v1.pine · strategy() declaration · ใช้ Strategy Tester ดู P&L · ❌ ไม่ต้องตั้ง alert",
+      },
+      {
+        title: "Settings v1.3 Day Trader",
+        icon: "robot",
+        body: "Fast EMA 9 · Slow EMA 21 · Trend EMA 50 · ADX 15 · SL 1.2 ATR · TP1 0.8R · TP2 1.6R · Cooldown 1 · Time filter OFF",
+      },
+      {
+        title: "Sync settings ระหว่าง 2 Pine",
         icon: "refresh",
-        body: "เปลี่ยน TELEGRAM_WEBHOOK_SECRET หรือ domain → กด 'Re-register' ให้ Telegram รู้ค่าใหม่",
+        body: "หลัง optimize Strategy → port inputs ไปที่ Indicator v2 settings (ไม่ต้องลบ alert) · TradingView ใช้ inputs ปัจจุบันเสมอ",
+      },
+    ],
+    callouts: [
+      {
+        tone: "buy",
+        icon: "circle-check",
+        text: (
+          <>
+            <strong>Strategy v1.3 backtest ผลล่าสุด:</strong> 173 trades · win rate 58.96% · PF 0.819
+            · เพิ่ม Daily filter + Short only → PF 1.31 (profitable)
+          </>
+        ),
       },
       {
-        title: "Delete (maintenance)",
-        icon: "trash",
-        body: "ปิด webhook ชั่วคราว — bot จะไม่รับ message จนกว่าจะ Setup ใหม่",
+        tone: "warn",
+        icon: "alert-triangle",
+        text: "ถ้าทั้งวันไม่มี trade → เช็ค ADX min, Volume mult, ATR% min ใน Indicator v2 settings — ถ้าค่าสูงเกินจะ filter ทุก signal ออก",
+      },
+    ],
+  },
+  {
+    id: "a-tradingview",
+    title: "TradingView Alert Setup",
+    icon: "chart-line",
+    intro:
+      "ตั้งครั้งเดียว · alert ใช้โค้ด Pine ตอนสร้าง — ถ้าแก้โค้ดต้องสร้าง alert ใหม่",
+    steps: [
+      {
+        title: "Pine Editor → Save script",
+        icon: "edit",
+        body: "Paste โค้ดจาก pine/btc_futures_signal_v2.pine · Save · Add to chart",
+      },
+      {
+        title: "Create Alert",
+        icon: "bell",
+        body: "Right-click chart → Add alert · Condition: 'BTC Futures BUY/SELL Webhook Alert v2' · Sub: 'Any alert() function call' (สำคัญ!)",
+      },
+      {
+        title: "Webhook URL",
+        icon: "send",
+        body: "https://tradesure.d2infinite.com/api/webhook/tradingview · Message field: เว้นว่าง (Pine กำหนด JSON เอง)",
+      },
+      {
+        title: "Plan requirement",
+        icon: "diamond",
+        body: "Free / Essential plan ใช้ webhook ไม่ได้ — ต้อง Pro+ ขึ้นไป",
       },
     ],
     callouts: [
       {
         tone: "warn",
         icon: "alert-triangle",
-        text: "Telegram จำกัด setWebhook ที่ 1 ครั้งต่อนาที — อย่ากดถี่",
+        text: "ถ้าเปลี่ยน Inputs → alert ใช้ค่าใหม่ทันที (ไม่ต้องสร้างใหม่) · ถ้าแก้ Pine code → ต้องลบ alert + สร้างใหม่",
+      },
+      {
+        tone: "info",
+        icon: "info",
+        text: "Webhook ตอบ TradingView ภายใน <500ms (fire-and-forget) — AI วิเคราะห์ + Telegram ทำใน background",
+      },
+    ],
+  },
+  {
+    id: "a-filters",
+    title: "Filters & Environment Variables",
+    icon: "filter",
+    intro:
+      "3 ชั้น filter ที่กรองสัญญาณคุณภาพต่ำ — ตั้งผ่าน env vars ใน Firebase App Hosting · view ผ่าน View Configuration modal",
+    table: {
+      headers: ["Variable", "Default", "ความหมาย"],
+      rows: [
+        ["MIN_CONFIDENCE", "70", "AI confidence ต่ำกว่านี้ → SKIP_LOW_CONF (ไม่ส่ง Telegram)"],
+        ["BLOCKED_HOURS", "13,14,16,17,20", "ชั่วโมง BKK ที่ post-filter block (defense-in-depth — Pine ก็ block ด้วย)"],
+        ["NOTRADE_TELEGRAM", "1", "ส่ง NO_TRADE heartbeat ทุกชั่วโมง · ตั้ง 0 = ปิด"],
+        ["TRADINGVIEW_WEBHOOK_SECRET", "—", "Pine secret ต้องตรง — มิฉะนั้น 401"],
+        ["TELEGRAM_BOT_TOKEN", "—", "Bot token จาก @BotFather"],
+        ["MIN_CONFIDENCE override", "via DB", "Future: per-symbol confidence"],
+      ],
+    },
+    callouts: [
+      {
+        tone: "info",
+        icon: "info",
+        text: "เปลี่ยน env var → ต้องรอ Firebase rollback (~2 นาที) แล้วทำงานทันที — ไม่ต้อง redeploy",
+      },
+      {
+        tone: "warn",
+        icon: "ban",
+        text: "BLOCKED_HOURS ใช้รูปแบบ comma-separated 0-23 BKK time — เช่น '13,14,20' = block 3 ชั่วโมง",
+      },
+    ],
+  },
+  {
+    id: "a-broadcast",
+    title: "Broadcast Status (เคย Test broadcast)",
+    icon: "send",
+    intro:
+      "ปุ่ม Broadcast status ที่ /dashboard/users — ส่ง System Status snapshot ไปทุก user · ทำหน้าที่ test delivery + system announcement",
+    steps: [
+      {
+        title: "เมื่อไหร่ควรกด",
+        icon: "info",
+        body: "หลังเปลี่ยน config สำคัญ (AI model, schedule, key) · weekly update · ทดสอบว่า Telegram broadcast ยังทำงาน",
+      },
+      {
+        title: "User จะเห็นอะไร",
+        icon: "telegram",
+        body: "System status + AI engine info + API keys status (no plaintext) + AI schedule + Filters + Connection counts",
+      },
+      {
+        title: "ส่งสำเร็จเช็คได้",
+        icon: "circle-check",
+        body: "Toast ขึ้น 'ส่ง Configuration snapshot สำเร็จ N chat' · ถ้า failed มี error log",
+      },
+    ],
+    callouts: [
+      {
+        tone: "buy",
+        icon: "shield-check",
+        text: "ปลอดภัย — API keys โชว์แค่ source label (DB/ENV/Not set) ไม่มี plaintext หรือ mask",
       },
     ],
   },
@@ -356,14 +689,9 @@ const ADMIN_SECTIONS: Section[] = [
         body: "Outcome reset เป็น PENDING → backtest รอบถัดไปคำนวณใหม่ด้วยค่าใหม่ (ไม่ต้องรอ Cloud Scheduler)",
       },
       {
-        title: "Delete เดี่ยว",
+        title: "Delete เดี่ยว / Bulk",
         icon: "trash",
-        body: "กดถังขยะที่ trade card → confirm dialog → ลบถาวร (ลบ tradingview_signals + ai_signal_analysis ผ่าน cascade)",
-      },
-      {
-        title: "Bulk delete",
-        icon: "check",
-        body: "ติ๊ก checkbox มุมขวาบนของ card หลายๆ ตัว → toolbar 'Delete selected (N)' โผล่ขึ้น → confirm",
+        body: "Single: กดถังขยะที่ card · Bulk: ติ๊ก checkbox มุมขวาบนหลาย cards → 'Delete selected (N)'",
       },
     ],
     callouts: [
@@ -375,75 +703,43 @@ const ADMIN_SECTIONS: Section[] = [
     ],
   },
   {
-    id: "a-schedule",
-    title: "Backtest schedule",
-    icon: "clock",
-    intro:
-      "ระบบ backtest อัตโนมัติทุก 15 นาที (Cloud Scheduler) — ใช้ Binance public klines · first-touch model",
+    id: "a-users",
+    title: "Users & Telegram contacts",
+    icon: "users",
+    intro: "ที่หน้า /dashboard/users — สร้าง user ใหม่จาก contact ที่ส่ง /start หา bot",
     steps: [
       {
-        title: "Status",
-        icon: "info",
-        body: "Active (รัน auto) / Paused (skip ทันทีโดยไม่กระทบ Cloud Scheduler)",
+        title: "ผู้ใช้ใหม่ส่ง /start หา bot",
+        icon: "telegram",
+        body: "Bot ตอบกลับพร้อม Chat ID + แจ้ง 'รอ admin อนุมัติ' — contact ปรากฏในตาราง Telegram contacts ทันที",
       },
       {
-        title: "Pause / Resume",
-        icon: "pause",
-        body: "Pause → API ตอบ {ok:true, skipped:true} ทันที · กรอก reason เพื่อ log ไว้",
+        title: "Create user จาก contact",
+        icon: "user-plus",
+        body: "ที่ row contact → '+ Create user' → ตั้ง username + display name + ☑ admin (ถ้าต้องการ) → Create",
       },
       {
-        title: "Run backtest now",
-        icon: "lightning",
-        body: "Trigger manual — override pause flag · มีปุ่มที่ /dashboard ด้วย (Run backtest / Re-evaluate all)",
-      },
-      {
-        title: "Recent runs",
-        icon: "history",
-        body: "ดู 20 runs ล่าสุด: เวลา, trigger (cron/manual), evaluated, W/L/O, win rate, duration, error",
+        title: "Toggle active/admin",
+        icon: "settings",
+        body: "ที่ตาราง Auth users → คลิก chip 'active' / 'admin' เพื่อ toggle",
       },
     ],
     callouts: [
       {
         tone: "info",
         icon: "info",
-        text: "Display interval ในหน้านี้เป็นเพียงตัวเลขแสดง — ความถี่จริงตั้งจาก Cloud Scheduler",
-      },
-    ],
-  },
-  {
-    id: "a-tradingview",
-    title: "TradingView setup",
-    icon: "chart-line",
-    intro:
-      "Pine Script → webhook → AI → Telegram pipeline · ตั้งค่าครั้งเดียวพอ",
-    steps: [
-      {
-        title: "Pine Script",
-        icon: "chart-candle",
-        body: "ใช้ไฟล์ pine/btc_futures_signal_v2.pine · ปรับ inputs (ADX/RSI/Volume/HTF) ตาม preset · secret = TRADINGVIEW_WEBHOOK_SECRET",
+        text: "Username pattern: a-z, A-Z, 0-9, _, - · ความยาว 2-40 ตัวอักษร",
       },
       {
-        title: "TradingView Alert",
-        icon: "bell",
-        body: "Condition: 'BTC Futures BUY/SELL Webhook Alert v2' + 'Any alert() function call' · Trigger: Once Per Bar Close · Webhook URL: https://tradesure.d2infinite.com/api/webhook/tradingview · Message: เว้นว่าง",
-      },
-      {
-        title: "Plan requirement",
-        icon: "diamond",
-        body: "Free / Essential plan ใช้ webhook ไม่ได้ — ต้อง Pro+ ขึ้นไป",
-      },
-    ],
-    callouts: [
-      {
-        tone: "info",
-        icon: "info",
-        text: "Webhook ตอบ TradingView ภายใน <500ms (fire-and-forget) — AI วิเคราะห์ + Telegram ทำใน background",
+        tone: "warn",
+        icon: "shield",
+        text: "Self-lockout protection: deactivate ตัวเองไม่ได้ + demote ตัวเองตอนเป็น admin คนเดียวไม่ได้",
       },
     ],
   },
   {
     id: "a-architecture",
-    title: "System architecture",
+    title: "System Architecture",
     icon: "device-analytics",
     intro: "ภาพรวม system stack ของ Tradesure",
     table: {
@@ -451,9 +747,11 @@ const ADMIN_SECTIONS: Section[] = [
       rows: [
         ["Frontend", "Next.js 14 App Router + TS + Tailwind", "Firebase App Hosting"],
         ["Database", "PostgreSQL", "Supabase"],
-        ["AI", "GPT-4o-mini (Chat Completions JSON mode)", "OpenAI"],
+        ["AI (primary)", "GPT-4o mini / GPT-4o / GPT-4.1", "OpenAI"],
+        ["AI (secondary)", "Gemini 2.5 Flash / Pro", "Google AI Studio"],
         ["Backtest data", "Public klines API (no key)", "Binance"],
-        ["Auth", "OTP via Telegram + HMAC signed cookie", "Self-hosted"],
+        ["Market context", "Fear&Greed + BTC.D + Funding", "alternative.me + CoinGecko + Binance"],
+        ["Auth", "OTP via Telegram + HMAC cookie", "Self-hosted"],
         ["Cron", "Cloud Scheduler (15m backtest, 30m trending)", "Google Cloud"],
         ["Notifications", "Bot API broadcast", "Telegram"],
         ["Domain + SSL", "tradesure.d2infinite.com", "DNS @ HostAtom + Firebase SSL"],
@@ -467,34 +765,18 @@ const ADMIN_SECTIONS: Section[] = [
     intro: "ปัญหาที่พบบ่อยและวิธีแก้",
     faq: [
       {
-        q: "TradingView ขึ้น 'request took too long and timed out'",
+        q: "ทั้งวันไม่มี BUY/SELL signal เลย (มีแค่ NO_TRADE)",
         a: (
           <>
-            ✅ <strong>แก้แล้ว</strong> — webhook ตอบภายใน &lt;500ms ด้วย fire-and-forget pattern · AI/Telegram ทำใน background
-          </>
-        ),
-      },
-      {
-        q: "User ไม่ได้รับ Telegram signal alert",
-        a: (
-          <>
-            เช็ค: 1) account active อยู่ไหม 2) chat_id ใน auth_users ตรงกับ chat ที่ login 3) ลอง 'Test broadcast' ที่ /dashboard/users
-          </>
-        ),
-      },
-      {
-        q: "Bot ไม่ตอบเมื่อส่ง /start",
-        a: (
-          <>
-            เช็ค Telegram webhook status ที่ /dashboard/users — ถ้า status ≠ Active ให้กด 'Setup webhook' ใหม่
-          </>
-        ),
-      },
-      {
-        q: "Backtest ไม่อัปเดต outcome",
-        a: (
-          <>
-            1) เช็ค schedule status — ถ้า Paused → Resume 2) signal time อยู่ในอดีตหรือยัง (ต้องมี klines หลัง signal time) 3) ดู Recent runs ที่ /dashboard/schedule ว่ามี error ไหม
+            <strong>สาเหตุที่พบบ่อยสุด:</strong>
+            <ul className="ml-4 mt-2 list-disc space-y-1">
+              <li>Indicator v2 settings เข้มเกิน — เช็ค ADX min (ควร 15), Volume mult (ควร 0.9), ATR% min (ควร 0.15)</li>
+              <li>Enable LONG ปิดอยู่ — เปิด ☑ Enable LONG (BUY) alerts</li>
+              <li>AI active schedule ปิดอยู่ — ดู banner เหลือง /dashboard</li>
+              <li>BTC market ranging (no EMA cross) — เป็นปกติ ถ้าตลาดไม่มี trend</li>
+            </ul>
+            <strong className="mt-2 block">วิธี diagnose:</strong> กด View Configuration ที่
+            /dashboard/schedule → ดู snapshot · หรืออ่าน reason ใน NO_TRADE Telegram messages
           </>
         ),
       },
@@ -502,7 +784,90 @@ const ADMIN_SECTIONS: Section[] = [
         q: "AI bias = WAIT บ่อยเกินไป",
         a: (
           <>
-            ดู /dashboard/analytics → Confidence vs Win rate — ถ้า confidence ของ WAIT สูง = AI ระมัดระวังถูก · ถ้า correlation ลบ = ปรับ AI prompt ใน lib/ai/analyzeCryptoSignal.ts
+            ดู /dashboard/analytics → Confidence vs Win rate — ถ้า confidence ของ WAIT สูง = AI ระมัดระวังถูก ·
+            ถ้า correlation ลบ = ปรับ AI prompt ใน lib/ai/analyzeCryptoSignal.ts
+          </>
+        ),
+      },
+      {
+        q: "Signals มี Queued เยอะ",
+        a: (
+          <>
+            AI active schedule ตั้งช่วงแคบเกิน → signal เข้านอกช่วง · ไปที่ /dashboard/schedule →
+            กด <strong>Process queue (N)</strong> เพื่อ batch วิเคราะห์ทั้งหมด ·
+            หรือขยาย active windows ให้ครอบคลุมเวลาที่ Pine fire signal
+          </>
+        ),
+      },
+      {
+        q: "ขาดทุนเรื่อยๆ — strategy เป็นยังไง?",
+        a: (
+          <>
+            1) ดู /dashboard/analytics → Rolling win rate (ลงเรื่อย = regime เปลี่ยน)
+            <br />
+            2) ดู Confidence vs Win rate — ถ้ากระจุก = AI ไม่ calibrated · prompt ใน analyzeCryptoSignal.ts
+            <br />
+            3) ลองเปิด Compare/Vote mode → second opinion ช่วย filter
+            <br />
+            4) Backtest Pine Strategy v1.3 หา parameter ที่ดีกว่า
+          </>
+        ),
+      },
+      {
+        q: "Margin call หลายครั้งใน backtest",
+        a: (
+          <>
+            Strategy Tester → Settings → <strong>Properties</strong> tab →
+            Default order size → เลือก <strong>"% of equity"</strong> (ไม่ใช่ "Quantity") +
+            ตั้งเป็น 20-25 → OK
+          </>
+        ),
+      },
+      {
+        q: "Pine alert ไม่ trigger หลังแก้โค้ด",
+        a: (
+          <>
+            TradingView cache โค้ดตอน create alert · ลบ alert เก่าที่ /dashboard/users → Alerts panel ·
+            สร้าง alert ใหม่ตามขั้นตอน TradingView setup
+          </>
+        ),
+      },
+      {
+        q: "Bot ไม่ตอบเมื่อส่ง /start",
+        a: (
+          <>
+            เช็ค Telegram webhook status ที่ /dashboard/users — ถ้า status ≠ Active
+            ให้กด 'Setup webhook' ใหม่
+          </>
+        ),
+      },
+      {
+        q: "User ไม่ได้รับ Telegram alert",
+        a: (
+          <>
+            เช็ค: 1) account active อยู่ไหม 2) chat_id ใน auth_users ตรงกับ chat ที่ login
+            3) ลอง <strong>Broadcast status</strong> ที่ /dashboard/users → ดู recipient count
+          </>
+        ),
+      },
+      {
+        q: "TradingView ขึ้น 'request took too long and timed out'",
+        a: (
+          <>
+            ✅ <strong>แก้แล้ว</strong> — webhook ตอบภายใน &lt;500ms ด้วย fire-and-forget pattern ·
+            AI/Telegram ทำใน background
+          </>
+        ),
+      },
+      {
+        q: "Backtest ไม่อัปเดต outcome",
+        a: (
+          <>
+            1) เช็ค schedule status — ถ้า Paused → Resume
+            <br />
+            2) signal time อยู่ในอดีตหรือยัง (ต้องมี klines หลัง signal time)
+            <br />
+            3) ดู Recent runs ที่ /dashboard/schedule ว่ามี error ไหม
           </>
         ),
       },
