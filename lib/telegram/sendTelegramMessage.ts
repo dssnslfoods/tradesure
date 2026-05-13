@@ -260,18 +260,20 @@ interface NoTradePayload {
     cooldown?: boolean;
     rsi_out?: boolean;
     htf_misalign?: boolean;
+    daily_misalign?: boolean;
   };
 }
 
 const REASON_LABELS_TH: Record<keyof NonNullable<NoTradePayload["reasons"]>, string> = {
-  no_cross:     "ไม่มี EMA cross (รอ setup)",
-  weak_trend:   "ADX ต่ำ (เทรนด์อ่อน)",
-  low_volume:   "Volume ไม่พอ",
-  dead_market:  "ATR% ต่ำ (ตลาดเงียบ)",
-  blocked_hour: "ชั่วโมงที่ block (win rate ต่ำในอดีต)",
-  cooldown:     "อยู่ในช่วง cooldown หลัง signal ล่าสุด",
-  rsi_out:      "RSI อยู่นอกโซนเข้า",
-  htf_misalign: "Higher-TF trend ไม่สอดคล้อง",
+  no_cross:       "ไม่มี EMA cross (รอ setup)",
+  weak_trend:     "ADX ต่ำ (เทรนด์อ่อน)",
+  low_volume:     "Volume ไม่พอ",
+  dead_market:    "ATR% ต่ำ (ตลาดเงียบ)",
+  blocked_hour:   "ชั่วโมงที่ block (win rate ต่ำในอดีต)",
+  cooldown:       "อยู่ในช่วง cooldown หลัง signal ล่าสุด",
+  rsi_out:        "RSI อยู่นอกโซนเข้า",
+  htf_misalign:   "Higher-TF trend ไม่สอดคล้อง",
+  daily_misalign: "ทิศ signal สวน Daily trend (regime gate)",
 };
 
 function fmtBangkokTime(t: string | number | undefined): string {

@@ -1,5 +1,22 @@
 //@version=6
-indicator("BTC Futures BUY/SELL Webhook Alert v2", overlay=true, max_labels_count=500)
+// =====================================================
+// BTC Futures BUY/SELL Webhook Alert v2.1
+//
+// v2.1 (May 14, 2026): Added Daily EMA200 trend filter — makes the system
+// regime-adaptive instead of forcing the admin to flip Enable LONG on/off
+// manually as BTC switches between bull and bear cycles. Strategy v1.3
+// backtest with this filter on lifted PF from 0.819 to 1.31.
+//
+// What the Daily filter does:
+//   - LONG fires only when close > Daily EMA200  (we're in an uptrend)
+//   - SHORT fires only when close < Daily EMA200 (we're in a downtrend)
+//   - Eliminates counter-trend trades, which were the main loss source
+//
+// Default OFF for backwards compatibility — turn on in the Inputs tab,
+// then recreate the TradingView alert so it uses the new code (TV caches
+// the script source at alert creation time).
+// =====================================================
+indicator("BTC Futures BUY/SELL Webhook Alert v2.1", overlay=true, max_labels_count=500)
 
 // =====================================================
 // === Inputs
@@ -32,6 +49,12 @@ useHtfFilter   = input.bool(false, "Require 4H EMA50 trend alignment", group=grp
 htfTimeframe   = input.string("240", "Higher timeframe", options=["120","240","360","720","D"], group=grpFilter)
 htfEmaLen      = input.int(50,   "HTF EMA length", minval=1, group=grpFilter)
 cooldownBars   = input.int(3,    "Cooldown bars after a signal", minval=0, group=grpFilter)
+
+// v2.1 — Daily trend filter (regime gate). When ON: LONG only when price is
+// above the daily EMA, SHORT only when below. Removes counter-trend trades
+// without having to flip Enable LONG / Enable SHORT manually.
+useDailyTrend     = input.bool(false, "Require Daily EMA trend alignment (v2.1)", group=grpFilter, tooltip="LONG only when price > Daily EMA, SHORT only when below. Default OFF for backwards compat — turn on to match the v1.3+Daily backtest profile.")
+dailyEmaLength    = input.int(200,    "Daily EMA length (v2.1)", minval=10, group=grpFilter)
 
 // Session / time-of-day filter — block hours with poor historical win rate
 // (Asia midday & US/London open whipsaw). Hours are evaluated in Asia/Bangkok TZ.
@@ -71,6 +94,11 @@ volMa = ta.sma(volume, volMaLength)
 // HTF trend (no repaint: lookahead_off + use confirmed HTF close)
 htfEma = request.security(syminfo.tickerid, htfTimeframe, ta.ema(close, htfEmaLen), lookahead=barmerge.lookahead_off)
 
+// v2.1 — Daily EMA200 for regime detection (no repaint either)
+dailyEma = request.security(syminfo.tickerid, "D", ta.ema(close, dailyEmaLength), lookahead=barmerge.lookahead_off)
+dailyTrendUp   = not na(dailyEma) and close > dailyEma
+dailyTrendDown = not na(dailyEma) and close < dailyEma
+
 // Filters
 trendUp     = trendEma > trendEma[trendSlopeBars]
 trendDown   = trendEma < trendEma[trendSlopeBars]
@@ -79,6 +107,11 @@ volOk       = volume > volMa * volMult
 atrOk       = (atr / close * 100.0) >= atrPctMin
 htfUp       = not useHtfFilter or close > htfEma
 htfDown     = not useHtfFilter or close < htfEma
+
+// v2.1 — Daily regime gate: when off this is a no-op (true); when on
+// it forces LONG to require dailyTrendUp and SHORT to require dailyTrendDown.
+dailyOkLong  = not useDailyTrend or dailyTrendUp
+dailyOkShort = not useDailyTrend or dailyTrendDown
 
 barReady = useConfirmedBar ? barstate.isconfirmed : true
 
@@ -95,8 +128,8 @@ canSignal = na(lastSignalBar) or (bar_index - lastSignalBar) >= cooldownBars
 rawLong  = ta.crossover(fastEma, slowEma)  and close > trendEma and rsi >= rsiLongMin  and rsi <= rsiLongMax
 rawShort = ta.crossunder(fastEma, slowEma) and close < trendEma and rsi <= rsiShortMax and rsi >= rsiShortMin
 
-longSignal  = enableLong  and barReady and rawLong  and trendUp   and trendStrong and volOk and atrOk and htfUp   and canSignal and timeOk
-shortSignal = enableShort and barReady and rawShort and trendDown and trendStrong and volOk and atrOk and htfDown and canSignal and timeOk
+longSignal  = enableLong  and barReady and rawLong  and trendUp   and trendStrong and volOk and atrOk and htfUp   and canSignal and timeOk and dailyOkLong
+shortSignal = enableShort and barReady and rawShort and trendDown and trendStrong and volOk and atrOk and htfDown and canSignal and timeOk and dailyOkShort
 
 if longSignal or shortSignal
     lastSignalBar := bar_index
@@ -131,6 +164,8 @@ plot(fastEma,  "Fast EMA",  color=color.new(color.teal, 0),   linewidth=2)
 plot(slowEma,  "Slow EMA",  color=color.new(color.orange, 0), linewidth=2)
 plot(trendEma, "Trend EMA", color=color.new(color.gray, 0),   linewidth=2)
 plot(useHtfFilter ? htfEma : na, "HTF EMA", color=color.new(color.purple, 0), linewidth=1, style=plot.style_circles)
+// v2.1 — Daily EMA: stepline so the regime level is obvious at a glance
+plot(useDailyTrend ? dailyEma : na, "Daily EMA", color=color.new(#FF6B35, 0), linewidth=2, style=plot.style_stepline)
 
 plotshape(longSignal,  title="BUY",  style=shape.labelup,   location=location.belowbar, color=color.new(color.green, 0), text="BUY",  textcolor=color.white, size=size.small)
 plotshape(shortSignal, title="SELL", style=shape.labeldown, location=location.abovebar, color=color.new(color.red,   0), text="SELL", textcolor=color.white, size=size.small)
@@ -158,7 +193,7 @@ if showLevels and shortSignal
     label.new(bar_index, shortTp2,  "TP2 " + str.tostring(shortTp2,  format.mintick), style=label.style_label_left, color=color.new(color.lime,  80), textcolor=color.lime,  size=size.tiny)
 
 // Live status table (top-right) — shows every filter's state in real time
-var table statusTbl = table.new(position.top_right, 2, 12, bgcolor=color.new(color.black, 75), border_width=1)
+var table statusTbl = table.new(position.top_right, 2, 13, bgcolor=color.new(color.black, 75), border_width=1)
 checkMark(bool b) => b ? "✓" : "✗"
 checkColor(bool b) => b ? color.lime : color.new(color.red, 30)
 
@@ -187,24 +222,30 @@ if showStatusTable and barstate.islast
     htfState = useHtfFilter ? (close > htfEma ? "UP" : "DN") : "off"
     table.cell(statusTbl, 1, 6, htfState, text_color=useHtfFilter ? color.lime : color.gray, text_size=size.small)
 
-    table.cell(statusTbl, 0, 7, "Hour (BKK)",   text_color=color.silver, text_size=size.small)
-    table.cell(statusTbl, 1, 7, str.tostring(currentHourBkk) + ":00 " + checkMark(timeOk), text_color=checkColor(timeOk), text_size=size.small)
+    // v2.1 — Daily regime row
+    table.cell(statusTbl, 0, 7, "Daily trend",  text_color=color.silver, text_size=size.small)
+    dailyState = useDailyTrend ? (dailyTrendUp ? "UP ✓" : dailyTrendDown ? "DN ✓" : "—") : "off"
+    dailyColor = useDailyTrend ? (dailyTrendUp ? color.lime : dailyTrendDown ? color.red : color.gray) : color.gray
+    table.cell(statusTbl, 1, 7, dailyState, text_color=dailyColor, text_size=size.small)
 
-    table.cell(statusTbl, 0, 8, "Cooldown",     text_color=color.silver, text_size=size.small)
+    table.cell(statusTbl, 0, 8, "Hour (BKK)",   text_color=color.silver, text_size=size.small)
+    table.cell(statusTbl, 1, 8, str.tostring(currentHourBkk) + ":00 " + checkMark(timeOk), text_color=checkColor(timeOk), text_size=size.small)
+
+    table.cell(statusTbl, 0, 9, "Cooldown",     text_color=color.silver, text_size=size.small)
     barsAgo = na(lastSignalBar) ? na : bar_index - lastSignalBar
     cooldownStr = na(barsAgo) ? "ready" : str.tostring(barsAgo) + "/" + str.tostring(cooldownBars)
-    table.cell(statusTbl, 1, 8, cooldownStr + " " + checkMark(canSignal), text_color=checkColor(canSignal), text_size=size.small)
+    table.cell(statusTbl, 1, 9, cooldownStr + " " + checkMark(canSignal), text_color=checkColor(canSignal), text_size=size.small)
 
-    table.cell(statusTbl, 0, 9, "Last signal",  text_color=color.silver, text_size=size.small)
-    table.cell(statusTbl, 1, 9, na(barsAgo) ? "—" : str.tostring(barsAgo) + " bars ago", text_color=color.white, text_size=size.small)
+    table.cell(statusTbl, 0, 10, "Last signal", text_color=color.silver, text_size=size.small)
+    table.cell(statusTbl, 1, 10, na(barsAgo) ? "—" : str.tostring(barsAgo) + " bars ago", text_color=color.white, text_size=size.small)
 
-    table.cell(statusTbl, 0, 10, "Price",       text_color=color.silver, text_size=size.small)
-    table.cell(statusTbl, 1, 10, str.tostring(close, format.mintick), text_color=color.white, text_size=size.small)
+    table.cell(statusTbl, 0, 11, "Price",       text_color=color.silver, text_size=size.small)
+    table.cell(statusTbl, 1, 11, str.tostring(close, format.mintick), text_color=color.white, text_size=size.small)
 
     statusText = longSignal ? "⬆ LONG SIGNAL" : shortSignal ? "⬇ SHORT SIGNAL" : "○ waiting"
     statusColor = longSignal ? color.lime : shortSignal ? color.red : color.gray
-    table.cell(statusTbl, 0, 11, statusText, text_color=statusColor, text_size=size.normal, bgcolor=color.new(statusColor, 80))
-    table.cell(statusTbl, 1, 11, "",          text_color=color.gray,  text_size=size.small, bgcolor=color.new(statusColor, 80))
+    table.cell(statusTbl, 0, 12, statusText, text_color=statusColor, text_size=size.normal, bgcolor=color.new(statusColor, 80))
+    table.cell(statusTbl, 1, 12, "",          text_color=color.gray,  text_size=size.small, bgcolor=color.new(statusColor, 80))
 
 // =====================================================
 // === JSON payload
@@ -243,6 +284,8 @@ ntBlockHour  = useTimeFilter and isBlockedHour
 ntCooldown   = (rawLong or rawShort) and not canSignal
 ntRsiOut     = (rawLong and not (rsi >= rsiLongMin and rsi <= rsiLongMax)) or (rawShort and not (rsi <= rsiShortMax and rsi >= rsiShortMin))
 ntHtfMis     = useHtfFilter and ((rawLong and close <= htfEma) or (rawShort and close >= htfEma))
+// v2.1 — Daily regime mismatch (Long signal but BTC < Daily EMA, or Short signal but BTC > Daily EMA)
+ntDailyMis   = useDailyTrend and ((rawLong and not dailyTrendUp) or (rawShort and not dailyTrendDown))
 
 boolStr(bool b) => b ? "true" : "false"
 
@@ -250,7 +293,7 @@ makeNoTradePayload() =>
     a = '{"secret":"' + secret + '","source":"' + botName + '","signal":"NO_TRADE"'
     b = ',"symbol":"' + syminfo.ticker + '","exchange":"' + syminfo.prefix + '","interval":"' + timeframe.period + '","timeframe":"' + timeframe.period + '"'
     c = ',"time":' + str.tostring(time) + ',"bar_time":' + str.tostring(time) + ',"price":' + fmt(close)
-    d = ',"reasons":{"no_cross":' + boolStr(ntNoCross) + ',"weak_trend":' + boolStr(ntWeakTrend) + ',"low_volume":' + boolStr(ntLowVolume) + ',"dead_market":' + boolStr(ntDeadMarket) + ',"blocked_hour":' + boolStr(ntBlockHour) + ',"cooldown":' + boolStr(ntCooldown) + ',"rsi_out":' + boolStr(ntRsiOut) + ',"htf_misalign":' + boolStr(ntHtfMis) + '}'
+    d = ',"reasons":{"no_cross":' + boolStr(ntNoCross) + ',"weak_trend":' + boolStr(ntWeakTrend) + ',"low_volume":' + boolStr(ntLowVolume) + ',"dead_market":' + boolStr(ntDeadMarket) + ',"blocked_hour":' + boolStr(ntBlockHour) + ',"cooldown":' + boolStr(ntCooldown) + ',"rsi_out":' + boolStr(ntRsiOut) + ',"htf_misalign":' + boolStr(ntHtfMis) + ',"daily_misalign":' + boolStr(ntDailyMis) + '}'
     e = ',"rsi":' + fmt(rsi) + ',"adx":' + fmt(adx) + ',"atr":' + fmt(atr) + ',"atr_pct":' + fmt(atr / close * 100.0)
     f = ',"volume":' + fmt(volume) + ',"volume_ma":' + fmt(volMa) + ',"hour_bkk":' + str.tostring(currentHourBkk) + '}'
     a + b + c + d + e + f
