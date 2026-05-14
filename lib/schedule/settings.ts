@@ -88,7 +88,10 @@ const DEFAULT_CONFIG: BacktestScheduleConfig = {
   ai_model_secondary: "gemini-2.5-flash", // sensible default if admin flips to compare/vote
   ai_active_windows: [],     // empty == always on
   ai_active_days: ALL_DAYS,  // all 7 days
-  active_trading_plans: ["swing", "intraday"], // default both plans on
+  // Default to swing-only — Pine v3 (intraday) was backtested and aborted
+  // (see pine/v3_backtest_results.md). Admin can still toggle intraday ON
+  // via the dashboard if a working v3 indicator ships in the future.
+  active_trading_plans: ["swing"],
   ai_active_hours_start: 0,
   ai_active_hours_end: 0,
   last_run_at: null,
@@ -167,12 +170,12 @@ function normalizeConfig(cfg: BacktestScheduleConfig): BacktestScheduleConfig {
   if (!Array.isArray(out.ai_active_windows)) out.ai_active_windows = [];
   if (!Array.isArray(out.ai_active_days)) out.ai_active_days = ALL_DAYS;
 
-  // Normalize active_trading_plans: legacy rows (pre-Phase-1a) have no field;
-  // treat them as "both plans active" so behaviour is unchanged for existing
-  // installs. Filter to known values so a stale enum value can't poison the
-  // gate.
+  // Normalize active_trading_plans: legacy rows (pre-Phase-1a) have no field
+  // — treat them as swing-only since that matches the post-abort default and
+  // there's no live v3 indicator producing intraday signals anyway. Filter to
+  // known values so a stale enum value can't poison the gate.
   if (!Array.isArray(out.active_trading_plans)) {
-    out.active_trading_plans = ["swing", "intraday"];
+    out.active_trading_plans = ["swing"];
   } else {
     out.active_trading_plans = out.active_trading_plans.filter((p): p is TradingPlan =>
       (TRADING_PLANS as readonly string[]).includes(p)
