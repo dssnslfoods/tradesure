@@ -492,9 +492,9 @@ export default function ScheduleControls({
                 ? "border-sig-violet/40 bg-sig-violet/15 text-sig-violet"
                 : "border-white/5 bg-surface-2/60 text-ink-muted hover:text-ink-primary"
             }`}
-            title="Pine v3 (15m day-trade) — ยังไม่ deploy. เปิดไว้ล่วงหน้าได้ จะเริ่มมีผลเมื่อมี indicator v3 ส่งเข้ามา"
+            title="Pine v4 (15m intraday, regime-gated). Backtest PF 2.75. ต้องสร้าง alert บน chart 15m ด้วย indicator btc_futures_signal_v4.pine"
           >
-            🟣 Intraday · 15m (v3)
+            🟣 Intraday · 15m (v4)
           </button>
           <button
             disabled={pending || !plansChanged}
