@@ -79,14 +79,16 @@ supabase/migrations/        ← SQL migrations (apply via Supabase MCP / dashboa
 |---|---|---|---|
 | `pine/btc_futures_signal_v2.pine` | `indicator()` v2.1.1 | **Live** — fires `alert()` JSON payloads to webhook | `swing` |
 | `pine/btc_futures_strategy_v1.pine` | `strategy()` v1.3 | **Backtest only** — Strategy Tester for swing | swing |
-| `pine/btc_futures_strategy_v3.pine` | `strategy()` v3 | **Backtest only — ABORTED** | intraday (would-be) |
-| `pine/v3_design.md` + `v3_backtest_results.md` | docs | Design + post-mortem for the intraday attempt | — |
+| `pine/btc_futures_strategy_v3.pine` | `strategy()` v3 | **Backtest only — ABORTED (EMA cross)** | intraday (would-be) |
+| `pine/btc_futures_strategy_v3_5.pine` | `strategy()` v3.5 | **Backtest only — ABORTED (VWAP reclaim)** | intraday (would-be) |
+| `pine/v3_design.md` + `v3_backtest_results.md` | docs | v3 design + post-mortem | — |
+| `pine/v3_5_design.md` + `v3_5_backtest_results.md` | docs | v3.5 design + post-mortem (final abort) | — |
 
 **v2.1.1 + v1.3 share the same trading logic** (EMA crosses, ADX, ATR-based SL/TP). Strategy mirrors indicator so backtest results approximate live performance.
 
 The live indicator is **symbol-agnostic**: uses `syminfo.ticker` + `request.security(syminfo.tickerid, "D", …)`. One Pine code, N TradingView alerts (one per symbol+TF). All alerts point to `/api/webhook/tradingview`.
 
-**v3 intraday status**: 🛑 Phase 3-4 aborted 2026-05-14 after 7 backtest variants all failed acceptance (PF ceiling ~0.75, target ≥1.1). See `pine/v3_backtest_results.md`. Multi-plan infrastructure (Phase 1a+1b) is preserved — admin can re-enable `intraday` plan via dashboard if/when a redesigned v3 ships. Default is now `active_trading_plans: ["swing"]`.
+**Intraday plan status**: 🛑 **Final abort 2026-05-14** after 9 backtest variants across 2 fundamentally different entry patterns (EMA cross + VWAP reclaim) — all failed acceptance (PF ceiling 0.754, target ≥1.1). See `pine/v3_backtest_results.md` and `pine/v3_5_backtest_results.md` for details. Multi-plan infrastructure (Phase 1a+1b) is preserved — admin can re-enable `intraday` plan via dashboard if/when a future redesign ships. Default is `active_trading_plans: ["swing"]`. Re-attempt conditions documented in `v3_5_backtest_results.md` §6.
 
 ---
 
