@@ -1,0 +1,380 @@
+//@version=6
+// =====================================================
+// BTC Futures Strategy v3.5 — VWAP Reclaim Intraday
+//
+// Phase 2 redo after v3 (EMA cross) was aborted. See pine/v3_5_design.md
+// for the full spec and pine/v3_backtest_results.md for what v3 taught us.
+//
+// Core thesis: VWAP is an institutional anchor. Price violations followed
+// by reclaims = capitulation reversal, which is a stronger intraday signal
+// than EMA cross trend continuation.
+//
+// What v3.5 does differently from v3:
+//   PARAMETER           v3 (aborted)      v3.5 (this)
+//   ─────────────       ──────────────    ──────────────────
+//   Trigger             EMA20/50 cross    VWAP reclaim after 3+ bar flush
+//   SL anchor           Fixed 0.8 ATR     Dynamic swing low/high − 0.2 ATR
+//   R sizing            Fixed             Varies with volatility regime
+//   LONG/SHORT          Asymmetric edge   Symmetric by design
+//   Volume role         Filter            Core trigger confirmation
+//   Time-stop           8 bars (2hr)      6 bars (90min)
+//   Cooldown            2 bars            3 bars
+//   Default exit        Partial+runner    Full Exit at TP1
+//
+// Acceptance bar: PF ≥ 1.1 AND LONG PF + SHORT PF both ≥ 1.0 (key v3 lesson).
+// =====================================================
+strategy("BTC Futures Strategy v3.5 (VWAP reclaim)",
+     overlay=true,
+     initial_capital=10000,
+     default_qty_type=strategy.percent_of_equity,
+     default_qty_value=25,
+     commission_type=strategy.commission.percent,
+     commission_value=0.04,
+     slippage=2,
+     pyramiding=0,
+     calc_on_every_tick=false,
+     process_orders_on_close=true,
+     max_labels_count=500,
+     max_bars_back=2000)
+
+// =====================================================
+// === Inputs
+// =====================================================
+grpSetup  = "Setup (VWAP reclaim)"
+setupMinBars     = input.int(3,  "Setup min bars under/over VWAP", minval=1, group=grpSetup,
+     tooltip="Bars price must stay on the wrong side of VWAP before a reclaim counts. 3 = ~45min on 15m.")
+setupMaxBars     = input.int(20, "Setup max bars (stale after)", minval=2, group=grpSetup,
+     tooltip="Older setups don't count — reclaim from 50 bars ago isn't a reclaim.")
+useTwoBarConfirm = input.bool(true, "Require 2-bar confirmation", group=grpSetup,
+     tooltip="Fire entry on bar AFTER reclaim if it stays past VWAP. Cuts whipsaw at cost of 15min delay.")
+useVolumeConfirm = input.bool(true, "Use volume confirmation",    group=grpSetup,
+     tooltip="Highly recommended — no-volume reclaims are noise. Default ON.")
+volMult          = input.float(1.2, "Volume × MA at reclaim",      minval=0.1, step=0.1, group=grpSetup)
+volMaLength      = input.int(20,    "Volume MA length",            minval=1, group=grpSetup)
+
+grpFilter = "Entry Filters"
+useRsiGate    = input.bool(true, "Use RSI gate", group=grpFilter)
+rsiLongMin    = input.int(35, "Min RSI for LONG",  minval=0, maxval=100, group=grpFilter)
+rsiShortMax   = input.int(65, "Max RSI for SHORT", minval=0, maxval=100, group=grpFilter)
+rsiLength     = input.int(14, "RSI length",        minval=1, group=grpFilter)
+cooldownBars  = input.int(3,  "Cooldown bars",     minval=0, group=grpFilter)
+
+useSessionFilter = input.bool(false, "Use session filter (US 13-22 BKK)", group=grpFilter)
+useHtfGate       = input.bool(false, "Use 1H EMA50 trend gate",           group=grpFilter)
+
+grpRisk = "Risk"
+atrLength        = input.int(14,    "ATR length",           minval=1, group=grpRisk)
+swingLookback    = input.int(10,    "Swing-low/high lookback bars", minval=2, group=grpRisk,
+     tooltip="How far back to scan for the structural swing low (LONG SL) / high (SHORT SL).")
+slBufferMult     = input.float(0.2, "SL buffer × ATR (below swing)", minval=0.0, step=0.05, group=grpRisk)
+rClampAtrMult    = input.float(3.0, "Max R as × ATR (skip if larger)", minval=1.0, step=0.5, group=grpRisk,
+     tooltip="If swing distance > this × ATR, the flush was too deep — skip the signal.")
+tp1Mult          = input.float(1.0, "TP1 R-multiple",        minval=0.1, step=0.1, group=grpRisk)
+tp2Mult          = input.float(2.0, "TP2 R-multiple",        minval=0.1, step=0.1, group=grpRisk)
+timeStopBars     = input.int(6,     "Time-stop bars (close at market)", minval=0, group=grpRisk,
+     tooltip="0 = disabled. 6 bars on 15m = 90 min.")
+
+grpExit = "Exit Mode"
+exitMode = input.string("Full exit at TP1",
+     "Exit mode", options=["Full exit at TP1", "TP1→TP2 (50% partial + runner, SL→BE)"], group=grpExit,
+     tooltip="v3 taught us partial+runner BE drag hurts. Default Full Exit. Only flip after baseline beats PF 1.1.")
+
+// =====================================================
+// === Indicators
+// =====================================================
+vwapVal  = ta.vwap
+rsi      = ta.rsi(close, rsiLength)
+atr      = ta.atr(atrLength)
+volMa    = ta.sma(volume, volMaLength)
+
+// 1H EMA50 — no lookahead so no repaint
+htfEma1h = request.security(syminfo.tickerid, "60", ta.ema(close, 50), lookahead=barmerge.lookahead_off)
+
+// =====================================================
+// === Session / VWAP reset detection
+// =====================================================
+// VWAP resets daily at the session boundary. Detect via day change so we can
+// also reset our setup counters in lockstep.
+isNewDay = ta.change(dayofmonth) != 0
+
+currentHourBkk = hour(time, "Asia/Bangkok")
+inUsSession    = currentHourBkk >= 13 and currentHourBkk < 22
+sessionOk      = not useSessionFilter or inUsSession
+
+// =====================================================
+// === Setup state — track flushes under/over VWAP
+// =====================================================
+var int   barsUnderVwap = 0
+var int   barsOverVwap  = 0
+var float swingLow      = na
+var float swingHigh     = na
+
+if isNewDay
+    // Fresh session, fresh slate (per design §14 Q3)
+    barsUnderVwap := 0
+    barsOverVwap  := 0
+    swingLow      := na
+    swingHigh     := na
+
+if close < vwapVal
+    barsUnderVwap := barsUnderVwap + 1
+    barsOverVwap  := 0
+    swingLow      := na(swingLow) ? low : math.min(swingLow, low)
+    swingHigh     := na
+else if close > vwapVal
+    barsOverVwap  := barsOverVwap + 1
+    barsUnderVwap := 0
+    swingHigh     := na(swingHigh) ? high : math.max(swingHigh, high)
+    swingLow      := na
+else
+    // close exactly at VWAP — rare, but neither flush
+    barsUnderVwap := 0
+    barsOverVwap  := 0
+
+// =====================================================
+// === Reclaim events
+// =====================================================
+// "Reclaim" = cross from under to over (LONG) or over to under (SHORT).
+// Setup depth uses [1] because at the cross bar, barsUnderVwap was just
+// reset to 0; we need the count from BEFORE the reclaim.
+longReclaimRaw  = ta.crossover(close, vwapVal)  and barsUnderVwap[1] >= setupMinBars and barsUnderVwap[1] <= setupMaxBars
+shortReclaimRaw = ta.crossunder(close, vwapVal) and barsOverVwap[1]  >= setupMinBars and barsOverVwap[1]  <= setupMaxBars
+
+// 2-bar confirmation: fire signal one bar after reclaim, only if price still
+// past VWAP. crossover(close,vwap)[1] = there was a reclaim last bar.
+// close > vwap = still past VWAP this bar.
+longTrigger  = useTwoBarConfirm ? (longReclaimRaw[1]  and close > vwapVal) : longReclaimRaw
+shortTrigger = useTwoBarConfirm ? (shortReclaimRaw[1] and close < vwapVal) : shortReclaimRaw
+
+// =====================================================
+// === Swing anchor capture
+// =====================================================
+// When the trigger fires, we need the swing low/high from the SETUP phase
+// (i.e., the last bar we tracked it). Because of 2-bar confirm, that may
+// be 1-2 bars back. Use [1] for non-confirm, [2] for confirm.
+swingAnchorLong  = useTwoBarConfirm ? swingLow[2]  : swingLow[1]
+swingAnchorShort = useTwoBarConfirm ? swingHigh[2] : swingHigh[1]
+
+// Fallback to recent N-bar swing if state didn't capture (e.g., right after reset)
+swingAnchorLong2  = na(swingAnchorLong)  ? ta.lowest(low,  swingLookback) : swingAnchorLong
+swingAnchorShort2 = na(swingAnchorShort) ? ta.highest(high, swingLookback) : swingAnchorShort
+
+// =====================================================
+// === Filters
+// =====================================================
+volOk         = not useVolumeConfirm or volume >= volMa * volMult
+rsiLongOk     = not useRsiGate or rsi >= rsiLongMin
+rsiShortOk    = not useRsiGate or rsi <= rsiShortMax
+htfLongOk     = not useHtfGate or close > htfEma1h
+htfShortOk    = not useHtfGate or close < htfEma1h
+
+var int lastSignalBar = na
+canSignal = na(lastSignalBar) or (bar_index - lastSignalBar) >= cooldownBars
+
+// =====================================================
+// === Trade plan (SL/TP geometry)
+// =====================================================
+// LONG — SL anchored to swing low, R clamped against extreme flushes
+longSL    = swingAnchorLong2 - atr * slBufferMult
+longRiskRaw = close - longSL
+longR     = math.max(longRiskRaw, atr * 0.1)   // floor at 0.1 ATR so divisions don't blow up
+longRok   = longRiskRaw > 0 and longRiskRaw <= atr * rClampAtrMult
+longTp1   = close + longR * tp1Mult
+longTp2   = close + longR * tp2Mult
+
+shortSL    = swingAnchorShort2 + atr * slBufferMult
+shortRiskRaw = shortSL - close
+shortR    = math.max(shortRiskRaw, atr * 0.1)
+shortRok  = shortRiskRaw > 0 and shortRiskRaw <= atr * rClampAtrMult
+shortTp1  = close - shortR * tp1Mult
+shortTp2  = close - shortR * tp2Mult
+
+// =====================================================
+// === Final entry conditions
+// =====================================================
+longSetup  = longTrigger  and volOk and rsiLongOk  and htfLongOk  and sessionOk and canSignal and longRok
+shortSetup = shortTrigger and volOk and rsiShortOk and htfShortOk and sessionOk and canSignal and shortRok
+
+// =====================================================
+// === Position state
+// =====================================================
+var float curEntry = na
+var float curSL    = na
+var float curTp1   = na
+var float curTp2   = na
+var bool  tp1Done  = false
+var int   posDir   = 0
+var int   posBar   = na
+
+useRunner = exitMode == "TP1→TP2 (50% partial + runner, SL→BE)"
+
+// =====================================================
+// === EXIT LOGIC (manual OHLC checks — same proven pattern as v1.3/v3)
+// =====================================================
+if posDir == 1 and strategy.position_size > 0
+    slHit   = low  <= curSL
+    tp1Hit  = high >= curTp1
+    tp2Hit  = high >= curTp2
+    barsIn  = bar_index - posBar
+
+    if useRunner
+        if not tp1Done
+            if slHit
+                strategy.close("L", comment="SL")
+                posDir := 0
+            else if tp1Hit
+                strategy.close("L", qty_percent=50, comment="TP1")
+                tp1Done := true
+                curSL   := curEntry
+            else if timeStopBars > 0 and barsIn >= timeStopBars
+                strategy.close("L", comment="TimeStop")
+                posDir := 0
+        else
+            if slHit
+                strategy.close("L", comment="BE")
+                posDir  := 0
+                tp1Done := false
+            else if tp2Hit
+                strategy.close("L", comment="TP2")
+                posDir  := 0
+                tp1Done := false
+            else if timeStopBars > 0 and barsIn >= timeStopBars * 2
+                strategy.close("L", comment="TimeStop-Runner")
+                posDir  := 0
+                tp1Done := false
+    else
+        if slHit
+            strategy.close("L", comment="SL")
+            posDir := 0
+        else if tp1Hit
+            strategy.close("L", comment="TP1")
+            posDir := 0
+        else if timeStopBars > 0 and barsIn >= timeStopBars
+            strategy.close("L", comment="TimeStop")
+            posDir := 0
+
+if posDir == -1 and strategy.position_size < 0
+    slHit   = high >= curSL
+    tp1Hit  = low  <= curTp1
+    tp2Hit  = low  <= curTp2
+    barsIn  = bar_index - posBar
+
+    if useRunner
+        if not tp1Done
+            if slHit
+                strategy.close("S", comment="SL")
+                posDir := 0
+            else if tp1Hit
+                strategy.close("S", qty_percent=50, comment="TP1")
+                tp1Done := true
+                curSL   := curEntry
+            else if timeStopBars > 0 and barsIn >= timeStopBars
+                strategy.close("S", comment="TimeStop")
+                posDir := 0
+        else
+            if slHit
+                strategy.close("S", comment="BE")
+                posDir  := 0
+                tp1Done := false
+            else if tp2Hit
+                strategy.close("S", comment="TP2")
+                posDir  := 0
+                tp1Done := false
+            else if timeStopBars > 0 and barsIn >= timeStopBars * 2
+                strategy.close("S", comment="TimeStop-Runner")
+                posDir  := 0
+                tp1Done := false
+    else
+        if slHit
+            strategy.close("S", comment="SL")
+            posDir := 0
+        else if tp1Hit
+            strategy.close("S", comment="TP1")
+            posDir := 0
+        else if timeStopBars > 0 and barsIn >= timeStopBars
+            strategy.close("S", comment="TimeStop")
+            posDir := 0
+
+if strategy.position_size == 0 and posDir != 0
+    posDir  := 0
+    tp1Done := false
+
+// =====================================================
+// === ENTRIES
+// =====================================================
+if longSetup and posDir == 0
+    strategy.entry("L", strategy.long)
+    curEntry      := close
+    curSL         := longSL
+    curTp1        := longTp1
+    curTp2        := longTp2
+    tp1Done       := false
+    posDir        := 1
+    posBar        := bar_index
+    lastSignalBar := bar_index
+
+if shortSetup and posDir == 0
+    strategy.entry("S", strategy.short)
+    curEntry      := close
+    curSL         := shortSL
+    curTp1        := shortTp1
+    curTp2        := shortTp2
+    tp1Done       := false
+    posDir        := -1
+    posBar        := bar_index
+    lastSignalBar := bar_index
+
+// =====================================================
+// === Plotting
+// =====================================================
+plot(vwapVal,  "VWAP",     color=color.new(color.fuchsia, 0), linewidth=2)
+plot(useHtfGate ? htfEma1h : na, "1H EMA50", color=color.new(color.yellow, 0), style=plot.style_stepline)
+
+plotshape(longSetup,  title="LONG reclaim",  style=shape.triangleup,   location=location.belowbar, color=color.new(color.lime, 0), size=size.small)
+plotshape(shortSetup, title="SHORT reclaim", style=shape.triangledown, location=location.abovebar, color=color.new(color.red, 0),  size=size.small)
+
+// =====================================================
+// === Status table
+// =====================================================
+var table info = table.new(position.top_right, 2, 15, border_width=1)
+if barstate.islast
+    decided  = strategy.wintrades + strategy.losstrades
+    winRate  = decided > 0 ? strategy.wintrades / decided * 100.0 : 0.0
+    pf       = strategy.grossloss > 0 ? strategy.grossprofit / strategy.grossloss : 0.0
+    setupState = posDir == 1 ? "LONG OPEN" : posDir == -1 ? "SHORT OPEN" : barsUnderVwap > 0 ? "Under VWAP " + str.tostring(barsUnderVwap) + "b" : barsOverVwap > 0 ? "Over VWAP " + str.tostring(barsOverVwap) + "b" : "flat"
+
+    table.cell(info, 0, 0,  "v3.5 VWAP Reclaim", text_color=color.white, text_size=size.small, bgcolor=color.new(color.purple, 60))
+    table.cell(info, 1, 0,  syminfo.ticker + " " + timeframe.period, text_color=color.white, text_size=size.small, bgcolor=color.new(color.purple, 60))
+    table.cell(info, 0, 1,  "State",                 text_color=color.silver, text_size=size.small)
+    table.cell(info, 1, 1,  setupState,              text_color=color.white,  text_size=size.small)
+    table.cell(info, 0, 2,  "Trades",                text_color=color.silver, text_size=size.small)
+    table.cell(info, 1, 2,  str.tostring(strategy.closedtrades), text_color=color.white, text_size=size.small)
+    table.cell(info, 0, 3,  "Win rate",              text_color=color.silver, text_size=size.small)
+    table.cell(info, 1, 3,  decided > 0 ? str.tostring(winRate, "#.#") + "%" : "—",
+                            text_color=winRate >= 50 ? color.lime : color.red, text_size=size.small)
+    table.cell(info, 0, 4,  "PF",                    text_color=color.silver, text_size=size.small)
+    table.cell(info, 1, 4,  strategy.closedtrades > 0 ? str.tostring(pf, "#.##") : "—",
+                            text_color=pf >= 1.5 ? color.lime : pf >= 1.0 ? color.yellow : color.red, text_size=size.small)
+    table.cell(info, 0, 5,  "VWAP Δ %",              text_color=color.silver, text_size=size.small)
+    table.cell(info, 1, 5,  str.tostring((close - vwapVal) / close * 100.0, "#.##") + "%",
+                            text_color=close > vwapVal ? color.lime : color.red, text_size=size.small)
+    table.cell(info, 0, 6,  "RSI",                   text_color=color.silver, text_size=size.small)
+    table.cell(info, 1, 6,  str.tostring(rsi, "#.#"), text_color=color.white,  text_size=size.small)
+    table.cell(info, 0, 7,  "Vol × MA",              text_color=color.silver, text_size=size.small)
+    table.cell(info, 1, 7,  str.tostring(volume / volMa, "#.##") + "×",
+                            text_color=volOk ? color.lime : color.gray, text_size=size.small)
+    table.cell(info, 0, 8,  "Session",               text_color=color.silver, text_size=size.small)
+    table.cell(info, 1, 8,  inUsSession ? "US ✓" : "OFF", text_color=inUsSession ? color.lime : color.gray, text_size=size.small)
+    table.cell(info, 0, 9,  "Cooldown",              text_color=color.silver, text_size=size.small)
+    table.cell(info, 1, 9,  str.tostring(cooldownBars) + " bars", text_color=color.white, text_size=size.small)
+    table.cell(info, 0, 10, "TP1 / TP2 R",           text_color=color.silver, text_size=size.small)
+    table.cell(info, 1, 10, str.tostring(tp1Mult, "#.#") + " / " + str.tostring(tp2Mult, "#.#"), text_color=color.white, text_size=size.small)
+    table.cell(info, 0, 11, "Time-stop",             text_color=color.silver, text_size=size.small)
+    table.cell(info, 1, 11, timeStopBars > 0 ? str.tostring(timeStopBars) + " bars" : "off", text_color=color.white, text_size=size.small)
+    table.cell(info, 0, 12, "Exit mode",             text_color=color.silver, text_size=size.small)
+    table.cell(info, 1, 12, useRunner ? "Partial+Runner" : "Full Exit", text_color=color.white, text_size=size.small)
+    table.cell(info, 0, 13, "Vol/RSI/HTF/Sess",      text_color=color.silver, text_size=size.small)
+    table.cell(info, 1, 13, (useVolumeConfirm ? "V" : "-") + (useRsiGate ? "R" : "-") + (useHtfGate ? "H" : "-") + (useSessionFilter ? "S" : "-"),
+                            text_color=color.white, text_size=size.small)
+    table.cell(info, 0, 14, "2-bar confirm",         text_color=color.silver, text_size=size.small)
+    table.cell(info, 1, 14, useTwoBarConfirm ? "ON" : "OFF", text_color=color.white, text_size=size.small)
