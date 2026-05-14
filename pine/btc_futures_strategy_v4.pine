@@ -1,0 +1,393 @@
+//@version=6
+// =====================================================
+// BTC Futures Strategy v4 — Regime-Gated Asymmetric Intraday
+//
+// Synthesizes 9 prior backtests (v3 × 7 + v3.5 × 2):
+//   - v3 LONG (EMA cross) was strong (PF 0.96) but SHORT was weak (0.60)
+//   - v3.5 SHORT (VWAP reclaim) was strong (PF 0.80) but LONG was weak (0.30)
+//   - Both failed because they used ONE pattern in BOTH directions, ignoring
+//     the regime each pattern thrives in
+//
+// v4's bet: use Daily EMA200 as a regime SWITCH (not a filter):
+//   Daily UP   → ONLY LONG via EMA cross  (v3's strong side)
+//   Daily NEAR → NO_TRADE (ambiguous regime)
+//   Daily DOWN → ONLY SHORT via VWAP reclaim down (v3.5's strong side)
+//
+// Other lessons baked in:
+//   - Dynamic SL from swing structure (v3.5 mechanics — best we found)
+//   - R clamp at 3× ATR (skip deep flushes that would oversize the position)
+//   - Time-stop 6 bars (90min) — reclaims and breakout continuations
+//     resolve fast or fail
+//   - Full Exit at TP1 default (v3.5 lesson: partial+runner BE drag is real)
+//   - Cooldown 3 bars (45min anti-chop)
+//   - NO HTF filter (filter paradox)
+//
+// Acceptance bar (DO NOT ship live indicator unless ALL pass):
+//   - Trades ≥ 80 / available period
+//   - PF ≥ 1.1
+//   - LONG PF ≥ 1.0 AND SHORT PF ≥ 1.0
+//   - Max DD ≤ 25%
+//   - Avg duration ≤ 10 bars
+// =====================================================
+strategy("BTC Futures Strategy v4 (regime-gated intraday)",
+     overlay=true,
+     initial_capital=10000,
+     default_qty_type=strategy.percent_of_equity,
+     default_qty_value=25,
+     commission_type=strategy.commission.percent,
+     commission_value=0.04,
+     slippage=2,
+     pyramiding=0,
+     calc_on_every_tick=false,
+     process_orders_on_close=true,
+     max_labels_count=500,
+     max_bars_back=2000)
+
+// =====================================================
+// === Inputs
+// =====================================================
+grpRegime  = "Regime (Daily EMA200 switch)"
+dailyEmaLength      = input.int(200, "Daily EMA length", minval=10, group=grpRegime)
+neutralBandPct      = input.float(0.5, "Neutral band ±% around Daily EMA (NO_TRADE)", minval=0.0, step=0.1, group=grpRegime,
+     tooltip="If price is within ±this% of Daily EMA, regime is ambiguous → no trades. 0 = always pick a side.")
+
+grpLong    = "LONG path (EMA cross — fires only in Daily UP)"
+fastEmaLength       = input.int(20, "Fast EMA",  minval=1, group=grpLong)
+slowEmaLength       = input.int(50, "Slow EMA",  minval=1, group=grpLong)
+longCrossLookback   = input.int(4,  "Cross-recapture window (bars)", minval=1, group=grpLong,
+     tooltip="Allow LONG entries within N bars of a fresh EMA crossover (pullback re-entry).")
+rsiLongMin          = input.int(40, "RSI Long min", minval=0, maxval=100, group=grpLong)
+rsiLongMax          = input.int(65, "RSI Long max", minval=0, maxval=100, group=grpLong)
+
+grpShort   = "SHORT path (VWAP reclaim down — fires only in Daily DOWN)"
+setupMinBarsShort   = input.int(3,  "Min bars over VWAP before reclaim", minval=1, group=grpShort)
+setupMaxBarsShort   = input.int(20, "Max bars (stale after)",            minval=2, group=grpShort)
+useTwoBarConfirmShort = input.bool(true, "Require 2-bar confirmation (SHORT)", group=grpShort,
+     tooltip="Fire entry on bar AFTER reclaim if price stays below VWAP. Cuts whipsaw at cost of 15min delay.")
+rsiShortMax         = input.int(60, "RSI Short max", minval=0, maxval=100, group=grpShort)
+
+grpShared  = "Shared filters (both directions)"
+rsiLength           = input.int(14,  "RSI length",  minval=1, group=grpShared)
+atrLength           = input.int(14,  "ATR length",  minval=1, group=grpShared)
+adxLength           = input.int(14,  "ADX length",  minval=1, group=grpShared)
+adxMin              = input.int(20,  "ADX minimum", minval=0, group=grpShared)
+volMaLength         = input.int(20,  "Volume MA length", minval=1, group=grpShared)
+volMult             = input.float(1.2, "Min Volume × MA", minval=0.1, step=0.1, group=grpShared)
+cooldownBars        = input.int(3,   "Cooldown bars",  minval=0, group=grpShared)
+useSessionFilter    = input.bool(false, "Use session filter (US 13-22 BKK)", group=grpShared)
+
+grpRisk    = "Risk geometry (dynamic swing-based SL)"
+swingLookback       = input.int(10,  "Swing-low/high lookback bars", minval=2, group=grpRisk)
+slBufferMult        = input.float(0.2, "SL buffer × ATR (beyond swing)", minval=0.0, step=0.05, group=grpRisk)
+rClampAtrMult       = input.float(3.0, "Max R as × ATR (skip if larger)", minval=1.0, step=0.5, group=grpRisk)
+tp1Mult             = input.float(1.0, "TP1 R-multiple", minval=0.1, step=0.1, group=grpRisk)
+tp2Mult             = input.float(2.0, "TP2 R-multiple (only used in partial mode)", minval=0.1, step=0.1, group=grpRisk)
+timeStopBars        = input.int(6,   "Time-stop bars (0 = off)", minval=0, group=grpRisk)
+entryZoneAtrMult    = input.float(0.2, "Entry zone half-width × ATR", minval=0.05, step=0.05, group=grpRisk)
+
+grpExit    = "Exit mode"
+exitMode = input.string("Full exit at TP1",
+     "Exit mode", options=["Full exit at TP1", "TP1→TP2 (50% partial + runner, SL→BE)"], group=grpExit,
+     tooltip="v3.5 lesson: partial+runner BE drag hurts. Default Full Exit. Flip only if backtest PF ≥ 1.1.")
+
+// =====================================================
+// === Indicators
+// =====================================================
+fastEma   = ta.ema(close, fastEmaLength)
+slowEma   = ta.ema(close, slowEmaLength)
+vwapVal   = ta.vwap
+rsi       = ta.rsi(close, rsiLength)
+atr       = ta.atr(atrLength)
+[plusDi, minusDi, adx] = ta.dmi(adxLength, adxLength)
+volMa     = ta.sma(volume, volMaLength)
+
+// Daily EMA200 — no lookahead so we don't repaint
+dailyEma  = request.security(syminfo.tickerid, "D", ta.ema(close, dailyEmaLength), lookahead=barmerge.lookahead_off)
+
+// =====================================================
+// === Regime detection (the v4 core switch)
+// =====================================================
+dailyDistPct = (close - dailyEma) / dailyEma * 100.0
+regimeUp     = dailyDistPct >  neutralBandPct   // close clearly above daily EMA
+regimeDown   = dailyDistPct < -neutralBandPct   // close clearly below daily EMA
+regimeFlat   = not regimeUp and not regimeDown  // within ±band — NO_TRADE
+
+// =====================================================
+// === Session
+// =====================================================
+currentHourBkk = hour(time, "Asia/Bangkok")
+inUsSession    = currentHourBkk >= 13 and currentHourBkk < 22
+sessionOk      = not useSessionFilter or inUsSession
+
+// =====================================================
+// === VWAP setup tracking (for SHORT reclaim)
+// =====================================================
+isNewDay = ta.change(dayofmonth) != 0
+
+var int   barsOverVwap  = 0
+var float swingHigh     = na
+
+if isNewDay
+    barsOverVwap := 0
+    swingHigh    := na
+
+if close > vwapVal
+    barsOverVwap := barsOverVwap + 1
+    swingHigh    := na(swingHigh) ? high : math.max(swingHigh, high)
+else
+    barsOverVwap := 0
+    swingHigh    := na
+
+// =====================================================
+// === LONG path — EMA cross (only in regimeUp)
+// =====================================================
+longCross       = ta.crossover(fastEma, slowEma)
+
+// Track recent cross for pullback re-entries
+var int lastLongCrossBar = na
+if longCross
+    lastLongCrossBar := bar_index
+
+longCrossActive = not na(lastLongCrossBar) and (bar_index - lastLongCrossBar) <= longCrossLookback and fastEma > slowEma
+
+// LONG SL anchor: lowest low over swingLookback bars (structural support)
+longSwingAnchor = ta.lowest(low, swingLookback)
+longSL          = longSwingAnchor - atr * slBufferMult
+longRiskRaw     = close - longSL
+longR           = math.max(longRiskRaw, atr * 0.1)
+longRok         = longRiskRaw > 0 and longRiskRaw <= atr * rClampAtrMult
+longTp1         = close + longR * tp1Mult
+longTp2         = close + longR * tp2Mult
+
+// LONG filters
+rsiLongOk    = rsi >= rsiLongMin and rsi <= rsiLongMax
+volOk        = volume >= volMa * volMult
+trendStrong  = adx >= adxMin
+vwapLongOk   = close > vwapVal   // VWAP support — LONG needs price above VWAP
+
+// =====================================================
+// === SHORT path — VWAP reclaim down (only in regimeDown)
+// =====================================================
+shortReclaimRaw = ta.crossunder(close, vwapVal) and barsOverVwap[1] >= setupMinBarsShort and barsOverVwap[1] <= setupMaxBarsShort
+
+// 2-bar confirm: signal fires bar AFTER reclaim, only if close stays below vwap
+shortTrigger    = useTwoBarConfirmShort ? (shortReclaimRaw[1] and close < vwapVal) : shortReclaimRaw
+
+// SHORT SL anchor: highest high over the setup phase (captured by swingHigh tracker)
+// Fall back to bar lookback if state is reset
+shortSwingAnchorRaw = useTwoBarConfirmShort ? swingHigh[2] : swingHigh[1]
+shortSwingAnchor    = na(shortSwingAnchorRaw) ? ta.highest(high, swingLookback) : shortSwingAnchorRaw
+shortSL             = shortSwingAnchor + atr * slBufferMult
+shortRiskRaw        = shortSL - close
+shortR              = math.max(shortRiskRaw, atr * 0.1)
+shortRok            = shortRiskRaw > 0 and shortRiskRaw <= atr * rClampAtrMult
+shortTp1            = close - shortR * tp1Mult
+shortTp2            = close - shortR * tp2Mult
+
+// SHORT filters
+rsiShortOk   = rsi <= rsiShortMax
+
+// =====================================================
+// === Cooldown
+// =====================================================
+var int lastSignalBar = na
+canSignal = na(lastSignalBar) or (bar_index - lastSignalBar) >= cooldownBars
+
+// =====================================================
+// === Final entry conditions
+// =====================================================
+longSetup  = regimeUp   and longCrossActive and rsiLongOk  and volOk and trendStrong and vwapLongOk and sessionOk and canSignal and longRok
+shortSetup = regimeDown and shortTrigger    and rsiShortOk and volOk and trendStrong and sessionOk and canSignal and shortRok
+
+// =====================================================
+// === Position state
+// =====================================================
+var float curEntry = na
+var float curSL    = na
+var float curTp1   = na
+var float curTp2   = na
+var bool  tp1Done  = false
+var int   posDir   = 0
+var int   posBar   = na
+
+useRunner = exitMode == "TP1→TP2 (50% partial + runner, SL→BE)"
+
+// =====================================================
+// === EXIT LOGIC (manual OHLC checks — proven from v1.3/v3/v3.5)
+// =====================================================
+if posDir == 1 and strategy.position_size > 0
+    slHit   = low  <= curSL
+    tp1Hit  = high >= curTp1
+    tp2Hit  = high >= curTp2
+    barsIn  = bar_index - posBar
+
+    if useRunner
+        if not tp1Done
+            if slHit
+                strategy.close("L", comment="SL")
+                posDir := 0
+            else if tp1Hit
+                strategy.close("L", qty_percent=50, comment="TP1")
+                tp1Done := true
+                curSL   := curEntry
+            else if timeStopBars > 0 and barsIn >= timeStopBars
+                strategy.close("L", comment="TimeStop")
+                posDir := 0
+        else
+            if slHit
+                strategy.close("L", comment="BE")
+                posDir  := 0
+                tp1Done := false
+            else if tp2Hit
+                strategy.close("L", comment="TP2")
+                posDir  := 0
+                tp1Done := false
+            else if timeStopBars > 0 and barsIn >= timeStopBars * 2
+                strategy.close("L", comment="TimeStop-Runner")
+                posDir  := 0
+                tp1Done := false
+    else
+        if slHit
+            strategy.close("L", comment="SL")
+            posDir := 0
+        else if tp1Hit
+            strategy.close("L", comment="TP1")
+            posDir := 0
+        else if timeStopBars > 0 and barsIn >= timeStopBars
+            strategy.close("L", comment="TimeStop")
+            posDir := 0
+
+if posDir == -1 and strategy.position_size < 0
+    slHit   = high >= curSL
+    tp1Hit  = low  <= curTp1
+    tp2Hit  = low  <= curTp2
+    barsIn  = bar_index - posBar
+
+    if useRunner
+        if not tp1Done
+            if slHit
+                strategy.close("S", comment="SL")
+                posDir := 0
+            else if tp1Hit
+                strategy.close("S", qty_percent=50, comment="TP1")
+                tp1Done := true
+                curSL   := curEntry
+            else if timeStopBars > 0 and barsIn >= timeStopBars
+                strategy.close("S", comment="TimeStop")
+                posDir := 0
+        else
+            if slHit
+                strategy.close("S", comment="BE")
+                posDir  := 0
+                tp1Done := false
+            else if tp2Hit
+                strategy.close("S", comment="TP2")
+                posDir  := 0
+                tp1Done := false
+            else if timeStopBars > 0 and barsIn >= timeStopBars * 2
+                strategy.close("S", comment="TimeStop-Runner")
+                posDir  := 0
+                tp1Done := false
+    else
+        if slHit
+            strategy.close("S", comment="SL")
+            posDir := 0
+        else if tp1Hit
+            strategy.close("S", comment="TP1")
+            posDir := 0
+        else if timeStopBars > 0 and barsIn >= timeStopBars
+            strategy.close("S", comment="TimeStop")
+            posDir := 0
+
+if strategy.position_size == 0 and posDir != 0
+    posDir  := 0
+    tp1Done := false
+
+// =====================================================
+// === ENTRIES
+// =====================================================
+if longSetup and posDir == 0
+    strategy.entry("L", strategy.long)
+    curEntry      := close
+    curSL         := longSL
+    curTp1        := longTp1
+    curTp2        := longTp2
+    tp1Done       := false
+    posDir        := 1
+    posBar        := bar_index
+    lastSignalBar := bar_index
+
+if shortSetup and posDir == 0
+    strategy.entry("S", strategy.short)
+    curEntry      := close
+    curSL         := shortSL
+    curTp1        := shortTp1
+    curTp2        := shortTp2
+    tp1Done       := false
+    posDir        := -1
+    posBar        := bar_index
+    lastSignalBar := bar_index
+
+// =====================================================
+// === Plotting
+// =====================================================
+plot(vwapVal,  "VWAP",       color=color.new(color.fuchsia, 0), linewidth=2)
+plot(fastEma,  "Fast EMA",   color=color.new(color.aqua, 0))
+plot(slowEma,  "Slow EMA",   color=color.new(color.orange, 0))
+plot(dailyEma, "Daily EMA",  color=color.new(color.red, 0), style=plot.style_stepline, linewidth=2)
+
+regimeColor = regimeUp ? color.new(color.lime, 85) : regimeDown ? color.new(color.red, 85) : color.new(color.gray, 90)
+bgcolor(regimeColor, title="Regime tint")
+
+plotshape(longSetup,  title="LONG",  style=shape.triangleup,   location=location.belowbar, color=color.new(color.lime, 0), size=size.small)
+plotshape(shortSetup, title="SHORT", style=shape.triangledown, location=location.abovebar, color=color.new(color.red, 0),  size=size.small)
+
+// =====================================================
+// === Status table
+// =====================================================
+var table info = table.new(position.top_right, 2, 16, border_width=1)
+if barstate.islast
+    decided  = strategy.wintrades + strategy.losstrades
+    winRate  = decided > 0 ? strategy.wintrades / decided * 100.0 : 0.0
+    pf       = strategy.grossloss > 0 ? strategy.grossprofit / strategy.grossloss : 0.0
+    regimeLabel = regimeUp ? "UP — LONG armed" : regimeDown ? "DOWN — SHORT armed" : "FLAT — NO_TRADE"
+    regimeColor2 = regimeUp ? color.lime : regimeDown ? color.red : color.gray
+
+    table.cell(info, 0, 0,  "v4 Regime-Gated",  text_color=color.white, text_size=size.small, bgcolor=color.new(color.teal, 60))
+    table.cell(info, 1, 0,  syminfo.ticker + " " + timeframe.period, text_color=color.white, text_size=size.small, bgcolor=color.new(color.teal, 60))
+    table.cell(info, 0, 1,  "Regime",           text_color=color.silver, text_size=size.small)
+    table.cell(info, 1, 1,  regimeLabel,        text_color=regimeColor2, text_size=size.small)
+    table.cell(info, 0, 2,  "Daily Δ %",        text_color=color.silver, text_size=size.small)
+    table.cell(info, 1, 2,  str.tostring(dailyDistPct, "#.##") + "%",
+                            text_color=regimeUp ? color.lime : regimeDown ? color.red : color.gray, text_size=size.small)
+    table.cell(info, 0, 3,  "Trades",           text_color=color.silver, text_size=size.small)
+    table.cell(info, 1, 3,  str.tostring(strategy.closedtrades), text_color=color.white, text_size=size.small)
+    table.cell(info, 0, 4,  "Win rate",         text_color=color.silver, text_size=size.small)
+    table.cell(info, 1, 4,  decided > 0 ? str.tostring(winRate, "#.#") + "%" : "—",
+                            text_color=winRate >= 50 ? color.lime : color.red, text_size=size.small)
+    table.cell(info, 0, 5,  "PF",               text_color=color.silver, text_size=size.small)
+    table.cell(info, 1, 5,  strategy.closedtrades > 0 ? str.tostring(pf, "#.##") : "—",
+                            text_color=pf >= 1.5 ? color.lime : pf >= 1.0 ? color.yellow : color.red, text_size=size.small)
+    table.cell(info, 0, 6,  "ADX (≥" + str.tostring(adxMin) + ")", text_color=color.silver, text_size=size.small)
+    table.cell(info, 1, 6,  str.tostring(adx, "#.#"), text_color=trendStrong ? color.lime : color.gray, text_size=size.small)
+    table.cell(info, 0, 7,  "RSI",              text_color=color.silver, text_size=size.small)
+    table.cell(info, 1, 7,  str.tostring(rsi, "#.#"), text_color=color.white, text_size=size.small)
+    table.cell(info, 0, 8,  "VWAP Δ %",         text_color=color.silver, text_size=size.small)
+    table.cell(info, 1, 8,  str.tostring((close - vwapVal) / close * 100.0, "#.##") + "%",
+                            text_color=close > vwapVal ? color.lime : color.red, text_size=size.small)
+    table.cell(info, 0, 9,  "Vol × MA",         text_color=color.silver, text_size=size.small)
+    table.cell(info, 1, 9,  str.tostring(volume / volMa, "#.##") + "×",
+                            text_color=volOk ? color.lime : color.gray, text_size=size.small)
+    table.cell(info, 0, 10, "Session",          text_color=color.silver, text_size=size.small)
+    table.cell(info, 1, 10, inUsSession ? "US ✓" : "OFF", text_color=inUsSession ? color.lime : color.gray, text_size=size.small)
+    table.cell(info, 0, 11, "Cooldown",         text_color=color.silver, text_size=size.small)
+    table.cell(info, 1, 11, str.tostring(cooldownBars) + " bars", text_color=color.white, text_size=size.small)
+    table.cell(info, 0, 12, "TP1 / TP2 R",      text_color=color.silver, text_size=size.small)
+    table.cell(info, 1, 12, str.tostring(tp1Mult, "#.#") + " / " + str.tostring(tp2Mult, "#.#"), text_color=color.white, text_size=size.small)
+    table.cell(info, 0, 13, "Time-stop",        text_color=color.silver, text_size=size.small)
+    table.cell(info, 1, 13, timeStopBars > 0 ? str.tostring(timeStopBars) + " bars" : "off", text_color=color.white, text_size=size.small)
+    table.cell(info, 0, 14, "Exit mode",        text_color=color.silver, text_size=size.small)
+    table.cell(info, 1, 14, useRunner ? "Partial+Runner" : "Full Exit", text_color=color.white, text_size=size.small)
+    table.cell(info, 0, 15, "Position",         text_color=color.silver, text_size=size.small)
+    table.cell(info, 1, 15, posDir == 1 ? "LONG" : posDir == -1 ? "SHORT" : "flat",
+                            text_color=posDir == 0 ? color.gray : color.white, text_size=size.small)
