@@ -4,7 +4,9 @@ import {
   broadcastTelegramMessage,
   buildNoTradeMessage,
 } from "@/lib/telegram/sendTelegramMessage";
-import type { TradingViewPayload } from "@/types/signal";
+import { isTradingPlanActive } from "@/lib/schedule/settings";
+import { TRADING_PLANS } from "@/types/signal";
+import type { TradingPlan, TradingViewPayload } from "@/types/signal";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -48,6 +50,24 @@ export async function POST(req: NextRequest) {
     return badRequest(`Missing required fields: ${missing.join(", ")}`);
   }
 
+  // ─── Trading-plan filter ─────────────────────────────────────────────────
+  // Each indicator tags its payload with signal_type ("swing" | "intraday").
+  // Missing/unknown values default to "swing" for backwards compat with the
+  // pre-Phase-1a Pine v2.1. If the plan is disabled by admin, we reject the
+  // signal entirely — return 200 (TradingView treats non-2xx as a delivery
+  // failure and retries), but don't save, don't analyze, don't notify.
+  const rawType = typeof payload.signal_type === "string" ? payload.signal_type : undefined;
+  const planType: TradingPlan = (TRADING_PLANS as readonly string[]).includes(rawType ?? "")
+    ? (rawType as TradingPlan)
+    : "swing";
+  if (!(await isTradingPlanActive(planType))) {
+    return NextResponse.json({
+      ok: true,
+      rejected: "plan_inactive",
+      plan: planType,
+    });
+  }
+
   // ─── NO_TRADE fast path ──────────────────────────────────────────────────
   // Pine fires this every confirmed bar when neither LONG nor SHORT setup is
   // valid. We skip AI + DB storage and just notify Telegram so users know the
@@ -79,6 +99,7 @@ export async function POST(req: NextRequest) {
       price: Number.isFinite(priceNum) ? priceNum : null,
       signal: payload.signal,
       strategy: payload.strategy ?? null,
+      signal_type: planType,
       raw_payload: rawForStorage,
     })
     .select("id")

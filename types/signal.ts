@@ -1,3 +1,7 @@
+export type TradingPlan = "swing" | "intraday";
+
+export const TRADING_PLANS: readonly TradingPlan[] = ["swing", "intraday"];
+
 export interface TradingViewPayload {
   secret?: string;
   symbol: string;
@@ -7,6 +11,9 @@ export interface TradingViewPayload {
   time: string;
   signal: string;
   strategy?: string;
+  // Plan tag — Pine v2.1 (1H) sends "swing", Pine v3 (15m) sends "intraday".
+  // Missing/legacy alerts default to "swing" at the webhook boundary.
+  signal_type?: TradingPlan;
   rsi?: string | number;
   ema_fast?: string | number;
   ema_slow?: string | number;
@@ -55,6 +62,7 @@ export interface SignalRow {
   price: number | null;
   signal: string;
   strategy: string | null;
+  signal_type: TradingPlan | null;
   raw_payload: TradingViewPayload;
   created_at: string;
 }

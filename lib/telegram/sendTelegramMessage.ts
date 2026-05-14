@@ -8,6 +8,15 @@ function escapeHtml(s: string): string {
     .replace(/>/g, "&gt;");
 }
 
+// Phase 1a — small visual tag so users see which trading plan a message
+// belongs to. We use Thai labels because the rest of the UI is Thai.
+// Missing/unknown plan → "Swing" (legacy default).
+function planTag(signalType: unknown): string {
+  return signalType === "intraday"
+    ? "🟣 <b>[Intraday]</b>"
+    : "🔵 <b>[Swing]</b>";
+}
+
 function fmtPrice(v: string | number | undefined | null): string {
   if (v === null || v === undefined || v === "") return "-";
   const n = typeof v === "number" ? v : Number(v);
@@ -158,7 +167,7 @@ export function buildTelegramMessage(
   // ============= WAIT message: clear NO TRADE banner, no levels =============
   if (isWait) {
     const lines: string[] = [
-      "⛔ <b>NO TRADE — ไม่แนะนำให้เข้า</b>",
+      `${planTag(payload.signal_type)} ⛔ <b>NO TRADE — ไม่แนะนำให้เข้า</b>`,
       "━━━━━━━━━━━━━━━━━━━━",
       "",
       `เหรียญ: <b>${escapeHtml(payload.symbol)}</b>`,
@@ -194,7 +203,7 @@ export function buildTelegramMessage(
 
   // ============= LONG/SHORT message: full trade plan =============
   const lines: string[] = [
-    "🚨 <b>Crypto AI Signal Alert</b>",
+    `${planTag(payload.signal_type)} 🚨 <b>Crypto AI Signal Alert</b>`,
     "",
     `เหรียญ: <b>${escapeHtml(payload.symbol)}</b>`,
     `Timeframe: <b>${escapeHtml(payload.interval)}</b>`,
@@ -246,6 +255,7 @@ interface NoTradePayload {
   price?: string | number;
   time?: string | number;
   hour_bkk?: string | number;
+  signal_type?: string;
   rsi?: string | number;
   adx?: string | number;
   atr_pct?: string | number;
@@ -315,7 +325,7 @@ export function buildNoTradeMessage(payload: NoTradePayload): string {
   const atrPctStr = payload.atr_pct !== undefined ? Number(payload.atr_pct).toFixed(2) : "-";
 
   return [
-    `🟡 <b>NO TRADE</b> — ${escapeHtml(symbol)} ${escapeHtml(interval)}`,
+    `${planTag(payload.signal_type)} 🟡 <b>NO TRADE</b> — ${escapeHtml(symbol)} ${escapeHtml(interval)}`,
     `⏰ ${fmtBangkokTime(payload.time)} (BKK)`,
     "",
     "<b>ไม่เข้าเงื่อนไขเทรด:</b>",

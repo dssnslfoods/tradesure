@@ -1,4 +1,6 @@
 import { getSupabaseAdmin } from "@/lib/supabase/server";
+import type { TradingPlan } from "@/types/signal";
+import { TRADING_PLANS } from "@/types/signal";
 
 /**
  * A single AI active-hours window. Both bounds are integer hours 0..23 in
@@ -43,6 +45,18 @@ export interface BacktestScheduleConfig {
   ai_active_windows: AiWindow[];
   ai_active_days: number[];
 
+  // ── Active trading plans (Phase 1a: multi-plan support) ───────────────
+  // Which Pine indicators the webhook is allowed to act on. Signals whose
+  // `signal_type` is not in this list are rejected (200 OK with reason, NOT
+  // saved to DB, NOT sent to Telegram, NOT analyzed by AI). NO_TRADE
+  // heartbeats are likewise gated so users don't get noise from a plan they
+  // didn't subscribe to.
+  //   - ["swing", "intraday"] : default; both plans active
+  //   - ["swing"]              : only the 1H trend-following indicator (v2.1)
+  //   - ["intraday"]           : only the 15m day-trade indicator (v3)
+  //   - []                     : kill switch — reject everything
+  active_trading_plans: TradingPlan[];
+
   // ── Legacy single-window fields (kept for backwards compat) ────────────
   // Newer code reads ai_active_windows; these survive only so old JSON in
   // app_settings keeps loading. Setters always write the new fields and clear
@@ -74,6 +88,7 @@ const DEFAULT_CONFIG: BacktestScheduleConfig = {
   ai_model_secondary: "gemini-2.5-flash", // sensible default if admin flips to compare/vote
   ai_active_windows: [],     // empty == always on
   ai_active_days: ALL_DAYS,  // all 7 days
+  active_trading_plans: ["swing", "intraday"], // default both plans on
   ai_active_hours_start: 0,
   ai_active_hours_end: 0,
   last_run_at: null,
@@ -152,6 +167,18 @@ function normalizeConfig(cfg: BacktestScheduleConfig): BacktestScheduleConfig {
   if (!Array.isArray(out.ai_active_windows)) out.ai_active_windows = [];
   if (!Array.isArray(out.ai_active_days)) out.ai_active_days = ALL_DAYS;
 
+  // Normalize active_trading_plans: legacy rows (pre-Phase-1a) have no field;
+  // treat them as "both plans active" so behaviour is unchanged for existing
+  // installs. Filter to known values so a stale enum value can't poison the
+  // gate.
+  if (!Array.isArray(out.active_trading_plans)) {
+    out.active_trading_plans = ["swing", "intraday"];
+  } else {
+    out.active_trading_plans = out.active_trading_plans.filter((p): p is TradingPlan =>
+      (TRADING_PLANS as readonly string[]).includes(p)
+    );
+  }
+
   // If the new array is empty but the old single fields define a window, migrate.
   if (
     out.ai_active_windows.length === 0 &&
@@ -182,6 +209,26 @@ export async function getScheduleConfig(): Promise<BacktestScheduleConfig> {
     ...DEFAULT_CONFIG,
     ...(data.value as Partial<BacktestScheduleConfig>),
   });
+}
+
+/**
+ * Returns true if the given trading plan is currently active. Used by the
+ * webhook to filter out signals from plans the admin has disabled.
+ *
+ * The check fails OPEN on errors: if we can't read settings, we accept the
+ * signal rather than drop a potentially valid alert. The downstream pipeline
+ * still has its own gates.
+ */
+export async function isTradingPlanActive(
+  plan: TradingPlan | null | undefined
+): Promise<boolean> {
+  const normalized = plan ?? "swing"; // legacy alerts default to swing
+  try {
+    const cfg = await getScheduleConfig();
+    return cfg.active_trading_plans.includes(normalized);
+  } catch {
+    return true;
+  }
 }
 
 export async function updateScheduleConfig(

@@ -1,6 +1,11 @@
 //@version=6
 // =====================================================
-// BTC Futures BUY/SELL Webhook Alert v2.1
+// BTC Futures BUY/SELL Webhook Alert v2.1.1
+//
+// v2.1.1 (May 14, 2026): Tag every payload with "signal_type":"swing" so the
+// webhook can route this indicator under the "swing" trading plan. The
+// upcoming v3 (15m day-trade indicator) will tag itself "intraday". Admin
+// controls which plans are active via Settings → Active Trading Plans.
 //
 // v2.1 (May 14, 2026): Added Daily EMA200 trend filter — makes the system
 // regime-adaptive instead of forcing the admin to flip Enable LONG on/off
@@ -254,7 +259,7 @@ if showStatusTable and barstate.islast
 fmt(float x) => str.tostring(math.round(x * math.pow(10, priceDecimals)) / math.pow(10, priceDecimals))
 
 makePayload(string sig, float eMid, float eLow, float eHigh, float sl, float tp1v, float tp2v, float rAbs, float rPct) =>
-    a = '{"secret":"' + secret + '","source":"' + botName + '","signal":"' + sig + '"'
+    a = '{"secret":"' + secret + '","source":"' + botName + '","signal":"' + sig + '","signal_type":"swing"'
     b = ',"symbol":"' + syminfo.ticker + '","exchange":"' + syminfo.prefix + '","interval":"' + timeframe.period + '","timeframe":"' + timeframe.period + '"'
     c = ',"time":' + str.tostring(time) + ',"bar_time":' + str.tostring(time) + ',"price":' + fmt(close)
     d = ',"entry":' + fmt(eMid) + ',"entry_low":' + fmt(eLow) + ',"entry_high":' + fmt(eHigh)
@@ -290,7 +295,7 @@ ntDailyMis   = useDailyTrend and ((rawLong and not dailyTrendUp) or (rawShort an
 boolStr(bool b) => b ? "true" : "false"
 
 makeNoTradePayload() =>
-    a = '{"secret":"' + secret + '","source":"' + botName + '","signal":"NO_TRADE"'
+    a = '{"secret":"' + secret + '","source":"' + botName + '","signal":"NO_TRADE","signal_type":"swing"'
     b = ',"symbol":"' + syminfo.ticker + '","exchange":"' + syminfo.prefix + '","interval":"' + timeframe.period + '","timeframe":"' + timeframe.period + '"'
     c = ',"time":' + str.tostring(time) + ',"bar_time":' + str.tostring(time) + ',"price":' + fmt(close)
     d = ',"reasons":{"no_cross":' + boolStr(ntNoCross) + ',"weak_trend":' + boolStr(ntWeakTrend) + ',"low_volume":' + boolStr(ntLowVolume) + ',"dead_market":' + boolStr(ntDeadMarket) + ',"blocked_hour":' + boolStr(ntBlockHour) + ',"cooldown":' + boolStr(ntCooldown) + ',"rsi_out":' + boolStr(ntRsiOut) + ',"htf_misalign":' + boolStr(ntHtfMis) + ',"daily_misalign":' + boolStr(ntDailyMis) + '}'
