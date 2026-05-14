@@ -1,0 +1,346 @@
+//@version=6
+// =====================================================
+// BTC Futures Strategy v3 — Intraday Day-Trade Edition
+//
+// Companion to btc_futures_strategy_v1.pine (Swing v1.3). Two separate
+// trading plans:
+//   v1.3 → 1H Swing  → tag "swing"    (Pine indicator v2.1.1 fires lives)
+//   v3   → 15m Intra → tag "intraday" (Pine indicator v3 will fire lives)
+//
+// This file is the *strategy* (backtest) version. The live indicator will be
+// written after Phase 3 backtest results meet the acceptance criteria in
+// pine/v3_design.md §11.
+//
+// What v3 does differently from v1.3 (per pine/v3_design.md):
+//   PARAMETER         v1.3 Swing     v3 Intraday      Rationale
+//   ─────────────     ──────────     ───────────      ──────────
+//   Default TF        1H             15m              short hold time
+//   Fast EMA          9              20               less noise on 15m
+//   Slow EMA          21             50               session-scale trend
+//   Trend ref         EMA 50         VWAP (session)   intraday anchor
+//   ADX min           15             18               compensate noisier TF
+//   SL × ATR          1.2            0.8              tight risk for leverage
+//   TP1 R-multiple    0.8            1.0              1:1 minimum
+//   TP2 R-multiple    1.6            2.0              1:2 runner
+//   Cooldown bars     1              2                30min anti-chop
+//   Time-stop         none           8 bars (2hr)     futures don't park
+//   Daily EMA filter  optional       default OFF      not gated by daily
+//   VWAP gate         no             default ON       core intraday filter
+//   Session filter    no             optional         US session focus
+//
+// Acceptance criteria for promotion to live (pine/v3_design.md §11):
+//   ≥100 trades / 12mo BTC 15m · PF ≥ 1.1 · WR ≥ 45% · MaxDD ≤ 25% · avg
+//   duration ≤ 12 bars
+//
+// Position sizing matches v1.3 methodology: 25% per trade, no pyramiding.
+// =====================================================
+strategy("BTC Futures Strategy v3 (intraday)",
+     overlay=true,
+     initial_capital=10000,
+     default_qty_type=strategy.percent_of_equity,
+     default_qty_value=25,
+     commission_type=strategy.commission.percent,
+     commission_value=0.04,
+     slippage=2,
+     pyramiding=0,
+     calc_on_every_tick=false,
+     process_orders_on_close=true,
+     max_labels_count=500,
+     max_bars_back=2000)
+
+// =====================================================
+// === Inputs
+// =====================================================
+grpCore   = "Core EMAs / RSI / ATR (v3 intraday)"
+fastEmaLength  = input.int(20,  "Fast EMA (v3: 20)", minval=1, group=grpCore)
+slowEmaLength  = input.int(50,  "Slow EMA (v3: 50)", minval=1, group=grpCore)
+rsiLength      = input.int(14,  "RSI Length",         minval=1, group=grpCore)
+atrLength      = input.int(14,  "ATR Length",         minval=1, group=grpCore)
+adxLength      = input.int(14,  "ADX Length",         minval=1, group=grpCore)
+
+grpRisk   = "Risk (v3 tighter than swing)"
+atrStopMult     = input.float(0.8, "SL × ATR (v3: 0.8)",  minval=0.1, step=0.1, group=grpRisk)
+tp1Mult         = input.float(1.0, "TP1 R-multiple",       minval=0.1, step=0.1, group=grpRisk)
+tp2Mult         = input.float(2.0, "TP2 R-multiple",       minval=0.1, step=0.1, group=grpRisk)
+entryZoneAtrMult= input.float(0.3, "Entry zone half-width × ATR", minval=0.05, step=0.05, group=grpRisk)
+timeStopBars    = input.int(8,    "Time-stop bars (close at market if no TP1)", minval=0, group=grpRisk,
+     tooltip="Set to 0 to disable. 8 bars on 15m = 2 hours.")
+
+grpFilter = "Entry Filters"
+adxMin          = input.int(18,    "ADX minimum (v3: 18)", minval=0, group=grpFilter)
+rsiLongMin      = input.int(40,    "RSI Long min",         minval=0, maxval=100, group=grpFilter)
+rsiLongMax      = input.int(65,    "RSI Long max",         minval=0, maxval=100, group=grpFilter)
+rsiShortMin     = input.int(35,    "RSI Short min",        minval=0, maxval=100, group=grpFilter)
+rsiShortMax     = input.int(60,    "RSI Short max",        minval=0, maxval=100, group=grpFilter)
+minVolMult      = input.float(1.1, "Min Volume × MA",      minval=0.1, step=0.1, group=grpFilter)
+volMaLength     = input.int(20,    "Volume MA length",     minval=1, group=grpFilter)
+cooldownBars    = input.int(2,     "Cooldown bars (v3: 2)",minval=0, group=grpFilter)
+
+useVwapGate     = input.bool(true,  "Use VWAP gate (LONG > VWAP, SHORT < VWAP)", group=grpFilter,
+     tooltip="Core v3 filter — default ON. Turn off to see uncalibrated cross-only entries.")
+useSessionFilter= input.bool(false, "Use session filter (US: 13:00-22:00 BKK)", group=grpFilter)
+useHtfTrend     = input.bool(false, "Use 1H EMA50 alignment",                  group=grpFilter)
+useDailyTrend   = input.bool(false, "Use Daily EMA200 alignment (v3: default OFF)", group=grpFilter,
+     tooltip="v2.1 swing has this default ON. v3 leaves it off — intraday should not be gated by daily regime.")
+
+grpExit = "Exit Mode"
+exitMode = input.string("TP1→TP2 (50% partial + runner, SL→BE)",
+     "Exit mode", options=["TP1→TP2 (50% partial + runner, SL→BE)", "Full exit at TP1"], group=grpExit)
+
+// =====================================================
+// === Indicators
+// =====================================================
+fastEma  = ta.ema(close, fastEmaLength)
+slowEma  = ta.ema(close, slowEmaLength)
+rsi      = ta.rsi(close, rsiLength)
+[plusDi, minusDi, adx] = ta.dmi(adxLength, adxLength)
+atr      = ta.atr(atrLength)
+volMa    = ta.sma(volume, volMaLength)
+vwapVal  = ta.vwap
+
+// HTF / Daily — no-lookahead so we don't repaint
+htfEma1h    = request.security(syminfo.tickerid, "60", ta.ema(close, 50),  lookahead=barmerge.lookahead_off)
+dailyEma200 = request.security(syminfo.tickerid, "D",  ta.ema(close, 200), lookahead=barmerge.lookahead_off)
+
+// =====================================================
+// === Session derivation (BKK timezone)
+// =====================================================
+currentHourBkk = hour(time, "Asia/Bangkok")
+inUsSession    = currentHourBkk >= 13 and currentHourBkk < 22  // US: 13:00–22:00 BKK
+sessionOk      = not useSessionFilter or inUsSession
+
+// =====================================================
+// === Entry conditions
+// =====================================================
+longCross  = ta.crossover(fastEma, slowEma)
+shortCross = ta.crossunder(fastEma, slowEma)
+
+// Pullback re-entry window — within 4 bars of a fresh cross, allow re-entries
+// if other gates pass. Caps the "what if I missed the bar" noise.
+var int lastLongCrossBar  = na
+var int lastShortCrossBar = na
+if longCross
+    lastLongCrossBar := bar_index
+if shortCross
+    lastShortCrossBar := bar_index
+
+longCrossActive  = not na(lastLongCrossBar)  and (bar_index - lastLongCrossBar)  <= 4 and fastEma > slowEma
+shortCrossActive = not na(lastShortCrossBar) and (bar_index - lastShortCrossBar) <= 4 and fastEma < slowEma
+
+// Filters
+trendStrong   = adx >= adxMin
+volOk         = volume >= volMa * minVolMult
+rsiLongOk     = rsi >= rsiLongMin  and rsi <= rsiLongMax
+rsiShortOk    = rsi >= rsiShortMin and rsi <= rsiShortMax
+vwapLongOk    = not useVwapGate or close > vwapVal
+vwapShortOk   = not useVwapGate or close < vwapVal
+htfLongOk     = not useHtfTrend  or close > htfEma1h
+htfShortOk    = not useHtfTrend  or close < htfEma1h
+dailyLongOk   = not useDailyTrend or close > dailyEma200
+dailyShortOk  = not useDailyTrend or close < dailyEma200
+
+// Cooldown
+var int lastSignalBar = na
+canSignal = na(lastSignalBar) or (bar_index - lastSignalBar) >= cooldownBars
+
+longSetup  = longCrossActive  and trendStrong and volOk and rsiLongOk  and vwapLongOk  and htfLongOk  and dailyLongOk  and sessionOk and canSignal
+shortSetup = shortCrossActive and trendStrong and volOk and rsiShortOk and vwapShortOk and htfShortOk and dailyShortOk and sessionOk and canSignal
+
+// =====================================================
+// === Trade plan (entry / SL / TP)
+// =====================================================
+longStop  = close - atr * atrStopMult
+longRisk  = close - longStop
+longTp1   = close + longRisk * tp1Mult
+longTp2   = close + longRisk * tp2Mult
+
+shortStop = close + atr * atrStopMult
+shortRisk = shortStop - close
+shortTp1  = close - shortRisk * tp1Mult
+shortTp2  = close - shortRisk * tp2Mult
+
+// =====================================================
+// === Position state
+// =====================================================
+var float curEntry = na
+var float curSL    = na
+var float curTp1   = na
+var float curTp2   = na
+var bool  tp1Done  = false
+var int   posDir   = 0
+var int   posBar   = na
+
+useRunner = exitMode == "TP1→TP2 (50% partial + runner, SL→BE)"
+
+// =====================================================
+// === EXIT LOGIC (manual checks — same proven pattern as v1.3)
+// =====================================================
+if posDir == 1 and strategy.position_size > 0
+    slHit   = low  <= curSL
+    tp1Hit  = high >= curTp1
+    tp2Hit  = high >= curTp2
+    barsIn  = bar_index - posBar
+
+    if useRunner
+        if not tp1Done
+            if slHit
+                strategy.close("L", comment="SL")
+                posDir := 0
+            else if tp1Hit
+                strategy.close("L", qty_percent=50, comment="TP1")
+                tp1Done := true
+                curSL   := curEntry
+            else if timeStopBars > 0 and barsIn >= timeStopBars
+                strategy.close("L", comment="TimeStop")
+                posDir := 0
+        else
+            if slHit
+                strategy.close("L", comment="BE")
+                posDir  := 0
+                tp1Done := false
+            else if tp2Hit
+                strategy.close("L", comment="TP2")
+                posDir  := 0
+                tp1Done := false
+            else if timeStopBars > 0 and barsIn >= timeStopBars * 2
+                // Runner gets extra time, but cap it at 2× timeStop
+                strategy.close("L", comment="TimeStop-Runner")
+                posDir  := 0
+                tp1Done := false
+    else
+        if slHit
+            strategy.close("L", comment="SL")
+            posDir := 0
+        else if tp1Hit
+            strategy.close("L", comment="TP1")
+            posDir := 0
+        else if timeStopBars > 0 and barsIn >= timeStopBars
+            strategy.close("L", comment="TimeStop")
+            posDir := 0
+
+if posDir == -1 and strategy.position_size < 0
+    slHit   = high >= curSL
+    tp1Hit  = low  <= curTp1
+    tp2Hit  = low  <= curTp2
+    barsIn  = bar_index - posBar
+
+    if useRunner
+        if not tp1Done
+            if slHit
+                strategy.close("S", comment="SL")
+                posDir := 0
+            else if tp1Hit
+                strategy.close("S", qty_percent=50, comment="TP1")
+                tp1Done := true
+                curSL   := curEntry
+            else if timeStopBars > 0 and barsIn >= timeStopBars
+                strategy.close("S", comment="TimeStop")
+                posDir := 0
+        else
+            if slHit
+                strategy.close("S", comment="BE")
+                posDir  := 0
+                tp1Done := false
+            else if tp2Hit
+                strategy.close("S", comment="TP2")
+                posDir  := 0
+                tp1Done := false
+            else if timeStopBars > 0 and barsIn >= timeStopBars * 2
+                strategy.close("S", comment="TimeStop-Runner")
+                posDir  := 0
+                tp1Done := false
+    else
+        if slHit
+            strategy.close("S", comment="SL")
+            posDir := 0
+        else if tp1Hit
+            strategy.close("S", comment="TP1")
+            posDir := 0
+        else if timeStopBars > 0 and barsIn >= timeStopBars
+            strategy.close("S", comment="TimeStop")
+            posDir := 0
+
+if strategy.position_size == 0 and posDir != 0
+    posDir  := 0
+    tp1Done := false
+
+// =====================================================
+// === ENTRIES
+// =====================================================
+if longSetup and posDir == 0
+    strategy.entry("L", strategy.long)
+    curEntry      := close
+    curSL         := longStop
+    curTp1        := longTp1
+    curTp2        := longTp2
+    tp1Done       := false
+    posDir        := 1
+    posBar        := bar_index
+    lastSignalBar := bar_index
+
+if shortSetup and posDir == 0
+    strategy.entry("S", strategy.short)
+    curEntry      := close
+    curSL         := shortStop
+    curTp1        := shortTp1
+    curTp2        := shortTp2
+    tp1Done       := false
+    posDir        := -1
+    posBar        := bar_index
+    lastSignalBar := bar_index
+
+// =====================================================
+// === Plotting
+// =====================================================
+plot(fastEma, "Fast EMA",  color=color.new(color.aqua, 0))
+plot(slowEma, "Slow EMA",  color=color.new(color.orange, 0))
+plot(useVwapGate ? vwapVal : na, "VWAP", color=color.new(color.fuchsia, 0), linewidth=2)
+plot(useHtfTrend ? htfEma1h : na, "1H EMA50", color=color.new(color.yellow, 0), style=plot.style_stepline)
+plot(useDailyTrend ? dailyEma200 : na, "Daily EMA200", color=color.new(color.red, 0), style=plot.style_stepline)
+
+plotshape(longSetup,  title="Long",  style=shape.triangleup,   location=location.belowbar, color=color.new(color.lime, 0), size=size.tiny)
+plotshape(shortSetup, title="Short", style=shape.triangledown, location=location.abovebar, color=color.new(color.red, 0),  size=size.tiny)
+
+// =====================================================
+// === Status table
+// =====================================================
+var table info = table.new(position.top_right, 2, 14, border_width=1)
+if barstate.islast
+    decided  = strategy.wintrades + strategy.losstrades
+    winRate  = decided > 0 ? strategy.wintrades / decided * 100.0 : 0.0
+    pf       = strategy.grossloss > 0 ? strategy.grossprofit / strategy.grossloss : 0.0
+
+    table.cell(info, 0, 0,  "v3 Intraday",          text_color=color.white, text_size=size.small, bgcolor=color.new(color.purple, 60))
+    table.cell(info, 1, 0,  syminfo.ticker + " " + timeframe.period, text_color=color.white, text_size=size.small, bgcolor=color.new(color.purple, 60))
+    table.cell(info, 0, 1,  "Trades",                text_color=color.silver, text_size=size.small)
+    table.cell(info, 1, 1,  str.tostring(strategy.closedtrades),  text_color=color.white, text_size=size.small)
+    table.cell(info, 0, 2,  "Win rate",              text_color=color.silver, text_size=size.small)
+    table.cell(info, 1, 2,  decided > 0 ? str.tostring(winRate, "#.#") + "%" : "—",
+                            text_color=winRate >= 50 ? color.lime : color.red, text_size=size.small)
+    table.cell(info, 0, 3,  "PF",                    text_color=color.silver, text_size=size.small)
+    table.cell(info, 1, 3,  strategy.closedtrades > 0 ? str.tostring(pf, "#.##") : "—",
+                            text_color=pf >= 1.5 ? color.lime : pf >= 1.0 ? color.yellow : color.red, text_size=size.small)
+    table.cell(info, 0, 4,  "ADX (≥" + str.tostring(adxMin) + ")", text_color=color.silver, text_size=size.small)
+    table.cell(info, 1, 4,  str.tostring(adx, "#.#"), text_color=trendStrong ? color.lime : color.gray, text_size=size.small)
+    table.cell(info, 0, 5,  "RSI",                   text_color=color.silver, text_size=size.small)
+    table.cell(info, 1, 5,  str.tostring(rsi, "#.#"), text_color=color.white, text_size=size.small)
+    table.cell(info, 0, 6,  "Vol × MA",              text_color=color.silver, text_size=size.small)
+    table.cell(info, 1, 6,  str.tostring(volume / volMa, "#.##") + "×",
+                            text_color=volOk ? color.lime : color.gray, text_size=size.small)
+    table.cell(info, 0, 7,  "VWAP Δ",                text_color=color.silver, text_size=size.small)
+    table.cell(info, 1, 7,  str.tostring((close - vwapVal) / close * 100.0, "#.##") + "%",
+                            text_color=close > vwapVal ? color.lime : color.red, text_size=size.small)
+    table.cell(info, 0, 8,  "Session",               text_color=color.silver, text_size=size.small)
+    table.cell(info, 1, 8,  inUsSession ? "US ✓" : "OFF",
+                            text_color=inUsSession ? color.lime : color.gray, text_size=size.small)
+    table.cell(info, 0, 9,  "SL × ATR",              text_color=color.silver, text_size=size.small)
+    table.cell(info, 1, 9,  str.tostring(atrStopMult, "#.#"), text_color=color.white, text_size=size.small)
+    table.cell(info, 0, 10, "TP1 / TP2 R",           text_color=color.silver, text_size=size.small)
+    table.cell(info, 1, 10, str.tostring(tp1Mult, "#.#") + " / " + str.tostring(tp2Mult, "#.#"), text_color=color.white, text_size=size.small)
+    table.cell(info, 0, 11, "Time-stop",             text_color=color.silver, text_size=size.small)
+    table.cell(info, 1, 11, timeStopBars > 0 ? str.tostring(timeStopBars) + " bars" : "off", text_color=color.white, text_size=size.small)
+    table.cell(info, 0, 12, "Cooldown",              text_color=color.silver, text_size=size.small)
+    table.cell(info, 1, 12, str.tostring(cooldownBars) + " bars", text_color=color.white, text_size=size.small)
+    table.cell(info, 0, 13, "Position",              text_color=color.silver, text_size=size.small)
+    table.cell(info, 1, 13, posDir == 1 ? "LONG" : posDir == -1 ? "SHORT" : "flat",
+                            text_color=posDir == 0 ? color.gray : color.white, text_size=size.small)
