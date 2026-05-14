@@ -363,6 +363,25 @@ export default function ConfigDetailModal({ data }: { data: ConfigDetailData }) 
               />
             </Section>
 
+            {/* ── 4b. Active trading plans (Phase 1b) ── */}
+            <Section title="Active trading plans" icon="📡">
+              <Row
+                label="Accepted"
+                value={
+                  config.active_trading_plans.length === 0 ? (
+                    <StatusPill state="bad" label="ALL DISABLED (kill switch)" />
+                  ) : (
+                    <span className="text-ink-primary">
+                      {config.active_trading_plans
+                        .map((p) => (p === "swing" ? "🔵 Swing (1H)" : "🟣 Intraday (15m)"))
+                        .join(" + ")}
+                    </span>
+                  )
+                }
+                hint="สัญญาณจาก plan ที่ปิดอยู่จะถูก reject ที่ webhook ทันที"
+              />
+            </Section>
+
             {/* ── 5. Filters / Env ── */}
             <Section title="Filters & environment" icon="⚙️">
               <Row

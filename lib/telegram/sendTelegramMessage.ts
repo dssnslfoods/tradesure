@@ -367,6 +367,9 @@ export interface ConfigBroadcastInput {
   aiActiveWindowsSummary: string;     // pre-formatted by caller
   aiActiveDaysSummary: string;        // pre-formatted by caller
 
+  // Trading plans (Phase 1b — which Pine indicators the webhook accepts)
+  activeTradingPlansSummary: string;   // e.g., "Swing + Intraday" or "Swing only"
+
   // Filters / env
   minConfidence: string;
   blockedHours: string;
@@ -431,6 +434,9 @@ export function buildConfigBroadcastMessage(c: ConfigBroadcastInput): string {
     `   Status: ${aiNowEmoji}`,
     `   Windows: <code>${escapeHtml(c.aiActiveWindowsSummary)}</code>`,
     `   Days: <code>${escapeHtml(c.aiActiveDaysSummary)}</code>`,
+    "",
+    "📡 <b>Active Trading Plans</b>",
+    `   <code>${escapeHtml(c.activeTradingPlansSummary)}</code>`,
     "",
     "⚙️ <b>Quality Filters</b>",
     `   Min confidence: <b>${escapeHtml(c.minConfidence)}%</b>`,

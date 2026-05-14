@@ -48,7 +48,7 @@ interface Row {
   stop_loss_num: number | null;
   take_profit_1_num: number | null;
   take_profit_2_num: number | null;
-  tradingview_signals: { signal: string; price: number | null } | null;
+  tradingview_signals: { signal: string; price: number | null; signal_type: string | null } | null;
 }
 
 async function loadRows(): Promise<Row[]> {
@@ -61,7 +61,7 @@ async function loadRows(): Promise<Row[]> {
          telegram_sent, summary_th, signal_id,
          outcome, pnl_pct, outcome_at, bars_evaluated,
          entry_low, entry_high, stop_loss_num, take_profit_1_num, take_profit_2_num,
-         tradingview_signals:signal_id ( signal, price )`
+         tradingview_signals:signal_id ( signal, price, signal_type )`
       )
       .order("created_at", { ascending: false })
       .limit(100);
@@ -299,6 +299,10 @@ export default async function DashboardPage() {
           take_profit_2_num: r.take_profit_2_num,
           tv_signal: r.tradingview_signals?.signal ?? null,
           tv_price: r.tradingview_signals?.price ?? null,
+          signal_type: (r.tradingview_signals?.signal_type ?? null) as
+            | "swing"
+            | "intraday"
+            | null,
         }))}
       />
 

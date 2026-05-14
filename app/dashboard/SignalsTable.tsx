@@ -29,7 +29,15 @@ export interface SignalRow {
   take_profit_2_num: number | null;
   tv_signal: string | null;
   tv_price: number | null;
+  signal_type: "swing" | "intraday" | null;
 }
+
+type PlanFilter = "all" | "swing" | "intraday";
+
+const PLAN_LABEL: Record<Exclude<PlanFilter, "all">, { label: string; emoji: string }> = {
+  swing: { label: "Swing · 1H", emoji: "🔵" },
+  intraday: { label: "Intraday · 15m", emoji: "🟣" },
+};
 
 type FilterKey = "all" | "open" | "wins" | "losses" | "skip" | "queued";
 
@@ -60,8 +68,18 @@ export default function SignalsTable({
   const [editing, setEditing] = useState<SignalRow | null>(null);
   const [filter, setFilter] = useState<FilterKey>("all");
   const [symbolFilter, setSymbolFilter] = useState<string>("all");
+  const [planFilter, setPlanFilter] = useState<PlanFilter>("all");
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [page, setPage] = useState(0);
+
+  // Plans actually present in the data — treat NULL signal_type as "swing"
+  // (legacy rows). Only show the plan chip row if we see more than one plan,
+  // mirroring the symbol-filter behavior.
+  const uniquePlans = useMemo(() => {
+    const set = new Set<"swing" | "intraday">();
+    for (const r of rows) set.add(r.signal_type ?? "swing");
+    return Array.from(set).sort();
+  }, [rows]);
 
   // Unique symbols across all rows — sorted alphabetically so the filter is
   // stable as new symbols come in. We only render the symbol selector when
@@ -71,15 +89,18 @@ export default function SignalsTable({
   }, [rows]);
 
   const filterMatch = FILTERS.find((f) => f.key === filter)!;
-  // Apply BOTH filters — outcome filter (chips) and symbol filter (dropdown).
+  // Apply ALL THREE filters — outcome (chips), symbol, and trading plan.
+  const planMatches = (r: SignalRow) =>
+    planFilter === "all" || (r.signal_type ?? "swing") === planFilter;
   const visible = useMemo(
     () =>
       rows.filter(
         (r) =>
           filterMatch.match(r) &&
-          (symbolFilter === "all" || r.symbol === symbolFilter)
+          (symbolFilter === "all" || r.symbol === symbolFilter) &&
+          planMatches(r)
       ),
-    [rows, filterMatch, symbolFilter]
+    [rows, filterMatch, symbolFilter, planFilter]
   );
 
   // Pagination
@@ -92,7 +113,7 @@ export default function SignalsTable({
   // Reset to first page when any filter changes
   useEffect(() => {
     setPage(0);
-  }, [filter, symbolFilter]);
+  }, [filter, symbolFilter, planFilter]);
 
   // Outcome chip counts reflect the CURRENT symbol filter so the numbers
   // beside each chip match what the user would see after clicking it.
@@ -126,6 +147,70 @@ export default function SignalsTable({
 
   return (
     <div>
+      {/* Trading-plan filter — only shown when both plans have data */}
+      {uniquePlans.length >= 2 && (
+        <div className="mb-3 flex flex-wrap items-center gap-2 overflow-x-auto pb-1">
+          <span className="text-[11px] uppercase tracking-eyebrow text-ink-muted">
+            แผนเทรด:
+          </span>
+          <button
+            type="button"
+            onClick={() => setPlanFilter("all")}
+            className={`chip !text-[11px] transition ${
+              planFilter === "all"
+                ? "!bg-brand/15 !text-brand !border-brand/40"
+                : "hover:!bg-surface-2 hover:!text-ink-primary"
+            }`}
+          >
+            ทั้งหมด
+            <span className="ml-1 rounded bg-black/30 px-1.5 py-0.5 text-[9px] font-bold text-ink-muted">
+              {rows.length}
+            </span>
+          </button>
+          {uniquePlans.map((p) => {
+            const planRows = rows.filter((r) => (r.signal_type ?? "swing") === p);
+            const planWins = planRows.filter(
+              (r) => r.outcome === "WIN_TP1" || r.outcome === "WIN_TP2"
+            ).length;
+            const planLosses = planRows.filter((r) => r.outcome === "LOSS_SL").length;
+            const decided = planWins + planLosses;
+            const planWinRate = decided > 0 ? Math.round((planWins / decided) * 100) : null;
+            const meta = PLAN_LABEL[p];
+            return (
+              <button
+                key={p}
+                type="button"
+                onClick={() => setPlanFilter(p)}
+                className={`chip !text-[11px] transition ${
+                  planFilter === p
+                    ? "!bg-brand/15 !text-brand !border-brand/40"
+                    : "hover:!bg-surface-2 hover:!text-ink-primary"
+                }`}
+                title={
+                  planWinRate !== null
+                    ? `${planWins}W / ${planLosses}L · ${planWinRate}% win rate`
+                    : `${planRows.length} signals`
+                }
+              >
+                {meta.emoji} {meta.label}
+                <span className="ml-1 rounded bg-black/30 px-1.5 py-0.5 text-[9px] font-bold text-ink-muted">
+                  {planRows.length}
+                </span>
+                {planWinRate !== null && (
+                  <span
+                    className={`ml-1 text-[9px] font-bold ${
+                      planWinRate >= 50 ? "text-sig-buy" : "text-sig-sell"
+                    }`}
+                  >
+                    {planWinRate}%
+                  </span>
+                )}
+              </button>
+            );
+          })}
+        </div>
+      )}
+
       {/* Symbol filter — only shown when 2+ unique symbols are tracked */}
       {uniqueSymbols.length >= 2 && (
         <div className="mb-3 flex flex-wrap items-center gap-2 overflow-x-auto pb-1">

@@ -5,6 +5,7 @@ import {
   setEnabled,
   setIntervalMinutes,
   setCardRetentionDays,
+  setActiveTradingPlans,
   setAiActiveWindows,
   setAiActiveDays,
   setAiModel,
@@ -13,6 +14,7 @@ import {
   processQueuedSignals,
   triggerRunNow,
 } from "./actions";
+import type { TradingPlan } from "@/types/signal";
 import {
   isWithinAiSchedule,
   type AiWindow,
@@ -70,6 +72,13 @@ export default function ScheduleControls({
       : [{ start: config.ai_active_hours_start, end: config.ai_active_hours_end }]
   );
   const [days, setDays] = useState<number[]>(config.ai_active_days);
+  const [plans, setPlans] = useState<TradingPlan[]>(config.active_trading_plans);
+  const plansChanged =
+    JSON.stringify([...plans].sort()) !==
+    JSON.stringify([...config.active_trading_plans].sort());
+  const togglePlan = (p: TradingPlan) => {
+    setPlans((prev) => (prev.includes(p) ? prev.filter((x) => x !== p) : [...prev, p]));
+  };
   const [reason, setReason] = useState(config.paused_reason ?? "");
   const [msg, setMsg] = useState<string | null>(null);
 
@@ -431,6 +440,68 @@ export default function ScheduleControls({
             className="btn btn-secondary disabled:opacity-50"
           >
             Save mode
+          </button>
+        </div>
+      </div>
+
+      {/* Active trading plans — which Pine indicators are accepted right now */}
+      <div className="card space-y-4 p-5">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <div className="flex items-center gap-2">
+              <Icon name="filter" size={14} className="text-sig-info" />
+              <h3 className="text-[13px] font-semibold uppercase tracking-eyebrow text-ink-secondary">
+                Active trading plans
+              </h3>
+            </div>
+            <p className="mt-1 max-w-xl text-[11px] text-ink-muted">
+              เลือกได้มากกว่า 1 แผน — สัญญาณจาก plan ที่ปิดอยู่จะถูก{" "}
+              <span className="text-ink-secondary">reject ทันที</span> (ไม่บันทึก, ไม่ส่ง Telegram, ไม่เรียก AI).
+              NO_TRADE heartbeat ก็เงียบด้วย. ปิดทั้งหมด = kill switch.
+            </p>
+            <p className="mt-2 text-[12px] text-ink-secondary">
+              สถานะ:{" "}
+              <span className="font-mono text-ink-primary">
+                {config.active_trading_plans.length === 0
+                  ? "ปิดทั้งหมด (kill switch)"
+                  : config.active_trading_plans
+                      .map((p) => (p === "swing" ? "Swing (1H)" : "Intraday (15m)"))
+                      .join(" + ")}
+              </span>
+            </p>
+          </div>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            onClick={() => togglePlan("swing")}
+            className={`h-9 rounded-chip border px-3 text-[12px] font-semibold transition ${
+              plans.includes("swing")
+                ? "border-sig-info/40 bg-sig-info/15 text-sig-info"
+                : "border-white/5 bg-surface-2/60 text-ink-muted hover:text-ink-primary"
+            }`}
+          >
+            🔵 Swing · 1H (v2.1.1)
+          </button>
+          <button
+            type="button"
+            onClick={() => togglePlan("intraday")}
+            className={`h-9 rounded-chip border px-3 text-[12px] font-semibold transition ${
+              plans.includes("intraday")
+                ? "border-sig-violet/40 bg-sig-violet/15 text-sig-violet"
+                : "border-white/5 bg-surface-2/60 text-ink-muted hover:text-ink-primary"
+            }`}
+            title="Pine v3 (15m day-trade) — ยังไม่ deploy. เปิดไว้ล่วงหน้าได้ จะเริ่มมีผลเมื่อมี indicator v3 ส่งเข้ามา"
+          >
+            🟣 Intraday · 15m (v3)
+          </button>
+          <button
+            disabled={pending || !plansChanged}
+            onClick={() => safeRun(() => setActiveTradingPlans(plans))}
+            className="btn btn-secondary disabled:opacity-50"
+          >
+            Save plans
           </button>
         </div>
       </div>

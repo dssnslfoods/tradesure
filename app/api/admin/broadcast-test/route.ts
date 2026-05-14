@@ -139,6 +139,14 @@ async function buildSnapshot(): Promise<ConfigBroadcastInput> {
     aiActiveWindowsSummary: describeWindows(cfg?.ai_active_windows ?? []),
     aiActiveDaysSummary: describeDays(cfg?.ai_active_days ?? [0, 1, 2, 3, 4, 5, 6]),
 
+    activeTradingPlansSummary: (() => {
+      const plans = cfg?.active_trading_plans ?? ["swing", "intraday"];
+      if (plans.length === 0) return "❌ ALL DISABLED (kill switch)";
+      return plans
+        .map((p) => (p === "swing" ? "🔵 Swing (1H)" : "🟣 Intraday (15m)"))
+        .join(" + ");
+    })(),
+
     minConfidence: process.env.MIN_CONFIDENCE ?? "70",
     blockedHours: process.env.BLOCKED_HOURS ?? "13,14,16,17,20",
     notradeTelegram: process.env.NOTRADE_TELEGRAM ?? "1",

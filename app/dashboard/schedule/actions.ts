@@ -8,6 +8,7 @@ import {
   type AiKeyProvider,
 } from "@/lib/schedule/settings";
 import { isCurrentUserAdmin } from "@/lib/auth/guards";
+import { TRADING_PLANS, type TradingPlan } from "@/types/signal";
 
 async function requireAdminOrThrow() {
   if (!(await isCurrentUserAdmin())) {
@@ -90,6 +91,20 @@ export async function setAiActiveDays(days: number[]) {
   await updateScheduleConfig({ ai_active_days: clean });
   revalidatePath("/dashboard/schedule");
   revalidatePath("/dashboard");
+}
+
+export async function setActiveTradingPlans(plans: TradingPlan[]) {
+  await requireAdminOrThrow();
+  const valid = (TRADING_PLANS as readonly string[]).slice();
+  const clean = Array.from(new Set(plans)).filter((p): p is TradingPlan =>
+    valid.includes(p)
+  );
+  // Allow empty array — kill switch — but warn loudly via the action result.
+  // The webhook treats empty as "reject everything", which is intentional.
+  await updateScheduleConfig({ active_trading_plans: clean });
+  revalidatePath("/dashboard/schedule");
+  revalidatePath("/dashboard");
+  return { ok: true, plans: clean };
 }
 
 export async function setAiApiKey(provider: AiKeyProvider, key: string | null) {

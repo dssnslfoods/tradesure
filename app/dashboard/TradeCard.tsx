@@ -174,6 +174,21 @@ export default function TradeCard({
               <span className="chip chip-mute !py-0.5 !px-1.5 !text-[10px]">
                 {row.interval}
               </span>
+              {(row.signal_type ?? "swing") === "intraday" ? (
+                <span
+                  className="chip !py-0.5 !px-1.5 !text-[10px] !border-sig-violet/40 !bg-sig-violet/15 !text-sig-violet"
+                  title="Intraday plan (Pine v3, 15m)"
+                >
+                  🟣 Intraday
+                </span>
+              ) : (
+                <span
+                  className="chip !py-0.5 !px-1.5 !text-[10px] !border-sig-info/40 !bg-sig-info/15 !text-sig-info"
+                  title="Swing plan (Pine v2.1, 1H)"
+                >
+                  🔵 Swing
+                </span>
+              )}
             </div>
             <div className="mt-1 font-mono text-[10px] text-ink-muted">
               {fmtTime(row.created_at)}
