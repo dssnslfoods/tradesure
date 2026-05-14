@@ -162,7 +162,9 @@ shortReclaimRaw = ta.crossunder(close, vwapVal) and barsOverVwap[1] >= setupMinB
 shortTrigger    = useTwoBarConfirmShort ? (shortReclaimRaw[1] and close < vwapVal) : shortReclaimRaw
 
 shortSwingAnchorRaw = useTwoBarConfirmShort ? swingHigh[2] : swingHigh[1]
-shortSwingAnchor    = na(shortSwingAnchorRaw) ? ta.highest(high, swingLookback) : shortSwingAnchorRaw
+// Pre-compute the lookback fallback so ta.highest is called every bar (CW10004 fix)
+shortLookbackHigh   = ta.highest(high, swingLookback)
+shortSwingAnchor    = na(shortSwingAnchorRaw) ? shortLookbackHigh : shortSwingAnchorRaw
 shortSL             = shortSwingAnchor + atr * slBufferMult
 shortRiskRaw        = shortSL - close
 shortR              = math.max(shortRiskRaw, atr * 0.1)
@@ -243,19 +245,12 @@ makeNoTradePayload() =>
     a = '{"secret":"' + secret + '","source":"' + botName + '","signal":"NO_TRADE","signal_type":"intraday"'
     b = ',"symbol":"' + syminfo.ticker + '","exchange":"' + syminfo.prefix + '","interval":"' + timeframe.period + '","timeframe":"' + timeframe.period + '"'
     c = ',"time":' + str.tostring(time) + ',"bar_time":' + str.tostring(time) + ',"price":' + fmt(close)
-    d = ',"reasons":{'
-        + '"regime_flat":'      + boolStr(ntRegimeFlat)
-        + ',"regime_mismatch":' + boolStr(ntRegimeMismatch)
-        + ',"no_cross":'        + boolStr(ntNoCrossLong)
-        + ',"no_reclaim":'      + boolStr(ntNoReclaimShort)
-        + ',"weak_trend":'      + boolStr(ntWeakTrend)
-        + ',"low_volume":'      + boolStr(ntLowVolume)
-        + ',"rsi_out":'         + boolStr(ntRsiOut)
-        + ',"vwap_long":'       + boolStr(ntVwapLong)
-        + ',"session_off":'     + boolStr(ntSessionOff)
-        + ',"cooldown":'        + boolStr(ntCooldown)
-        + ',"r_clamp":'         + boolStr(ntRclamp)
-        + '}'
+    // Build reasons object in chunks — Pine v6 rejects "+" at line-start in continuations
+    d1 = ',"reasons":{"regime_flat":' + boolStr(ntRegimeFlat) + ',"regime_mismatch":' + boolStr(ntRegimeMismatch)
+    d2 = ',"no_cross":' + boolStr(ntNoCrossLong) + ',"no_reclaim":' + boolStr(ntNoReclaimShort) + ',"weak_trend":' + boolStr(ntWeakTrend)
+    d3 = ',"low_volume":' + boolStr(ntLowVolume) + ',"rsi_out":' + boolStr(ntRsiOut) + ',"vwap_long":' + boolStr(ntVwapLong)
+    d4 = ',"session_off":' + boolStr(ntSessionOff) + ',"cooldown":' + boolStr(ntCooldown) + ',"r_clamp":' + boolStr(ntRclamp) + '}'
+    d  = d1 + d2 + d3 + d4
     e = ',"rsi":' + fmt(rsi) + ',"adx":' + fmt(adx) + ',"atr":' + fmt(atr) + ',"atr_pct":' + fmt(atr / close * 100.0)
     f = ',"vwap":' + fmt(vwapVal) + ',"daily_ema":' + fmt(dailyEma) + ',"daily_dist_pct":' + fmt(dailyDistPct)
     g = ',"regime":"' + regimeTag + '","session":"' + sessionTag + '"'
