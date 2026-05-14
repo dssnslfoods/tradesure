@@ -1,0 +1,328 @@
+//@version=6
+// =====================================================
+// BTC Futures BUY/SELL Webhook Alert v4 — Intraday (15m)
+//
+// Live companion to btc_futures_strategy_v4.pine. Backtest passed with
+// PF 2.75 on Jan-May 2026 BTC 15m (12 trades, WR 58%, DD 0.21%). See
+// pine/v4_backtest_results.md for details.
+//
+// What this indicator does:
+//   1. Watches the chart's symbol on whatever TF you put it on (intended
+//      for 15m). Symbol-agnostic via syminfo.ticker.
+//   2. Reads Daily EMA200 — uses it as a REGIME SWITCH:
+//        Daily UP   (close > daily EMA + neutralBand) → only LONG armed
+//        Daily DOWN (close < daily EMA - neutralBand) → only SHORT armed
+//        Daily NEAR (within ±neutralBand)             → NO_TRADE
+//   3. LONG entries fire on EMA20/50 crossover during Daily UP regime.
+//   4. SHORT entries fire on VWAP reclaim-down during Daily DOWN regime.
+//   5. Risk: dynamic swing-based SL, R clamped to 3× ATR, TP1=1R, TP2=2R.
+//   6. Every fire sends an alert() JSON payload to /api/webhook/tradingview
+//      tagged signal_type:"intraday" → routed through the Intraday plan.
+//
+// Webhook setup:
+//   1. Add this indicator to a BTCUSDT (or ETHUSDT, etc.) 15m chart.
+//   2. Right-click chart → Add Alert.
+//   3. Condition: this indicator. Sub-condition: "Any alert() function call".
+//   4. Webhook URL: https://tradesure.d2infinite.com/api/webhook/tradingview
+//   5. Alert name: e.g., "BTCUSDT 15m Intraday v4".
+//   6. Trigger: Once Per Bar Close (default).
+//
+// REQUIRED admin setting: Active Trading Plans must include "intraday".
+// Toggle on at /dashboard/schedule under "Active trading plans".
+// =====================================================
+indicator("BTC Futures Intraday v4 (regime-gated)", overlay=true, max_labels_count=500)
+
+// =====================================================
+// === Inputs (defaults match strategy v4 Test K backtest)
+// =====================================================
+grpWebhook = "Webhook"
+secret    = input.string("",                "Webhook secret",     group=grpWebhook, confirm=true,
+     tooltip="Must match TRADINGVIEW_WEBHOOK_SECRET env var on the backend.")
+botName   = input.string("Tradesure v4",    "Bot name (source)",  group=grpWebhook)
+priceDecimals = input.int(2, "Price decimals in payload", minval=0, maxval=8, group=grpWebhook)
+
+grpRegime = "Regime (Daily EMA200 switch)"
+dailyEmaLength = input.int(200, "Daily EMA length", minval=10, group=grpRegime)
+neutralBandPct = input.float(0.25, "Neutral band ±% around Daily EMA (NO_TRADE)", minval=0.0, step=0.05, group=grpRegime,
+     tooltip="Match strategy v4 Test K default (0.25%). Smaller = more trades but more ambiguous.")
+
+grpLong = "LONG path (EMA cross — Daily UP only)"
+fastEmaLength      = input.int(20, "Fast EMA",  minval=1, group=grpLong)
+slowEmaLength      = input.int(50, "Slow EMA",  minval=1, group=grpLong)
+longCrossLookback  = input.int(4,  "Cross-recapture window (bars)", minval=1, group=grpLong)
+rsiLongMin         = input.int(40, "RSI Long min", minval=0, maxval=100, group=grpLong)
+rsiLongMax         = input.int(65, "RSI Long max", minval=0, maxval=100, group=grpLong)
+
+grpShort = "SHORT path (VWAP reclaim down — Daily DOWN only)"
+setupMinBarsShort     = input.int(3,  "Min bars over VWAP before reclaim", minval=1, group=grpShort)
+setupMaxBarsShort     = input.int(20, "Max bars (stale after)",            minval=2, group=grpShort)
+useTwoBarConfirmShort = input.bool(true, "Require 2-bar confirmation (SHORT)", group=grpShort)
+rsiShortMax           = input.int(60, "RSI Short max", minval=0, maxval=100, group=grpShort)
+
+grpShared = "Shared filters"
+rsiLength        = input.int(14,  "RSI length",  minval=1, group=grpShared)
+atrLength        = input.int(14,  "ATR length",  minval=1, group=grpShared)
+adxLength        = input.int(14,  "ADX length",  minval=1, group=grpShared)
+adxMin           = input.int(20,  "ADX minimum", minval=0, group=grpShared)
+volMaLength      = input.int(20,  "Volume MA length", minval=1, group=grpShared)
+volMult          = input.float(1.2, "Min Volume × MA", minval=0.1, step=0.1, group=grpShared)
+cooldownBars     = input.int(3,   "Cooldown bars", minval=0, group=grpShared)
+useSessionFilter = input.bool(false, "Use session filter (US 13-22 BKK)", group=grpShared)
+
+grpRisk = "Risk geometry"
+swingLookback    = input.int(10,  "Swing-low/high lookback bars", minval=2, group=grpRisk)
+slBufferMult     = input.float(0.2, "SL buffer × ATR (beyond swing)", minval=0.0, step=0.05, group=grpRisk)
+rClampAtrMult    = input.float(3.0, "Max R as × ATR (skip if larger)", minval=1.0, step=0.5, group=grpRisk)
+tp1Mult          = input.float(1.0, "TP1 R-multiple", minval=0.1, step=0.1, group=grpRisk)
+tp2Mult          = input.float(2.0, "TP2 R-multiple", minval=0.1, step=0.1, group=grpRisk)
+timeStopBars     = input.int(6,   "Time-stop bars (in payload for backend)", minval=0, group=grpRisk)
+entryZoneAtrMult = input.float(0.2, "Entry zone half-width × ATR", minval=0.05, step=0.05, group=grpRisk)
+
+grpAlert = "Alerts"
+enableNoTradeAlert = input.bool(true, "Fire NO_TRADE heartbeat every confirmed bar", group=grpAlert)
+
+// =====================================================
+// === Indicators
+// =====================================================
+fastEma = ta.ema(close, fastEmaLength)
+slowEma = ta.ema(close, slowEmaLength)
+vwapVal = ta.vwap
+rsi     = ta.rsi(close, rsiLength)
+atr     = ta.atr(atrLength)
+[plusDi, minusDi, adx] = ta.dmi(adxLength, adxLength)
+volMa   = ta.sma(volume, volMaLength)
+
+dailyEma = request.security(syminfo.tickerid, "D", ta.ema(close, dailyEmaLength), lookahead=barmerge.lookahead_off)
+
+// =====================================================
+// === Regime
+// =====================================================
+dailyDistPct = (close - dailyEma) / dailyEma * 100.0
+regimeUp     = dailyDistPct >  neutralBandPct
+regimeDown   = dailyDistPct < -neutralBandPct
+regimeFlat   = not regimeUp and not regimeDown
+
+// =====================================================
+// === Session
+// =====================================================
+currentHourBkk = hour(time, "Asia/Bangkok")
+inUsSession    = currentHourBkk >= 13 and currentHourBkk < 22
+sessionOk      = not useSessionFilter or inUsSession
+
+// =====================================================
+// === VWAP setup tracking for SHORT
+// =====================================================
+isNewDay = ta.change(dayofmonth) != 0
+
+var int   barsOverVwap  = 0
+var float swingHigh     = na
+
+if isNewDay
+    barsOverVwap := 0
+    swingHigh    := na
+
+if close > vwapVal
+    barsOverVwap := barsOverVwap + 1
+    swingHigh    := na(swingHigh) ? high : math.max(swingHigh, high)
+else
+    barsOverVwap := 0
+    swingHigh    := na
+
+// =====================================================
+// === LONG path
+// =====================================================
+longCross = ta.crossover(fastEma, slowEma)
+
+var int lastLongCrossBar = na
+if longCross
+    lastLongCrossBar := bar_index
+
+longCrossActive = not na(lastLongCrossBar) and (bar_index - lastLongCrossBar) <= longCrossLookback and fastEma > slowEma
+
+longSwingAnchor = ta.lowest(low, swingLookback)
+longSL          = longSwingAnchor - atr * slBufferMult
+longRiskRaw     = close - longSL
+longR           = math.max(longRiskRaw, atr * 0.1)
+longRok         = longRiskRaw > 0 and longRiskRaw <= atr * rClampAtrMult
+longTp1         = close + longR * tp1Mult
+longTp2         = close + longR * tp2Mult
+longEntryLow    = close - atr * entryZoneAtrMult
+longEntryHigh   = close + atr * entryZoneAtrMult
+longRiskPct     = longR / close * 100.0
+
+rsiLongOk    = rsi >= rsiLongMin and rsi <= rsiLongMax
+volOk        = volume >= volMa * volMult
+trendStrong  = adx >= adxMin
+vwapLongOk   = close > vwapVal
+
+// =====================================================
+// === SHORT path
+// =====================================================
+shortReclaimRaw = ta.crossunder(close, vwapVal) and barsOverVwap[1] >= setupMinBarsShort and barsOverVwap[1] <= setupMaxBarsShort
+shortTrigger    = useTwoBarConfirmShort ? (shortReclaimRaw[1] and close < vwapVal) : shortReclaimRaw
+
+shortSwingAnchorRaw = useTwoBarConfirmShort ? swingHigh[2] : swingHigh[1]
+shortSwingAnchor    = na(shortSwingAnchorRaw) ? ta.highest(high, swingLookback) : shortSwingAnchorRaw
+shortSL             = shortSwingAnchor + atr * slBufferMult
+shortRiskRaw        = shortSL - close
+shortR              = math.max(shortRiskRaw, atr * 0.1)
+shortRok            = shortRiskRaw > 0 and shortRiskRaw <= atr * rClampAtrMult
+shortTp1            = close - shortR * tp1Mult
+shortTp2            = close - shortR * tp2Mult
+shortEntryLow       = close - atr * entryZoneAtrMult
+shortEntryHigh      = close + atr * entryZoneAtrMult
+shortRiskPct        = shortR / close * 100.0
+
+rsiShortOk   = rsi <= rsiShortMax
+
+// =====================================================
+// === Cooldown
+// =====================================================
+var int lastSignalBar = na
+canSignal = na(lastSignalBar) or (bar_index - lastSignalBar) >= cooldownBars
+
+// =====================================================
+// === Final entry conditions
+// =====================================================
+longSignal  = regimeUp   and longCrossActive and rsiLongOk  and volOk and trendStrong and vwapLongOk and sessionOk and canSignal and longRok
+shortSignal = regimeDown and shortTrigger    and rsiShortOk and volOk and trendStrong and sessionOk and canSignal and shortRok
+
+// Latch cooldown
+if longSignal or shortSignal
+    lastSignalBar := bar_index
+
+// =====================================================
+// === JSON helpers
+// =====================================================
+fmt(float x) => str.tostring(math.round(x * math.pow(10, priceDecimals)) / math.pow(10, priceDecimals))
+
+sessionTag = inUsSession ? "us" : (currentHourBkk >= 7 and currentHourBkk < 13) ? "asia" : "eu"
+regimeTag  = regimeUp ? "up" : regimeDown ? "down" : "flat"
+
+makePayload(string sig, float eMid, float eLow, float eHigh, float sl, float tp1v, float tp2v, float rAbs, float rPct, float swingAnchor) =>
+    a = '{"secret":"' + secret + '","source":"' + botName + '","signal":"' + sig + '","signal_type":"intraday"'
+    b = ',"symbol":"' + syminfo.ticker + '","exchange":"' + syminfo.prefix + '","interval":"' + timeframe.period + '","timeframe":"' + timeframe.period + '"'
+    c = ',"time":' + str.tostring(time) + ',"bar_time":' + str.tostring(time) + ',"price":' + fmt(close)
+    d = ',"entry":' + fmt(eMid) + ',"entry_low":' + fmt(eLow) + ',"entry_high":' + fmt(eHigh)
+    e = ',"stop_loss":' + fmt(sl) + ',"take_profit":' + fmt(tp1v) + ',"tp1":' + fmt(tp1v) + ',"tp2":' + fmt(tp2v) + ',"sl":' + fmt(sl)
+    f = ',"risk":' + fmt(rAbs) + ',"risk_percent":' + fmt(rPct) + ',"risk_reward_ratio":' + str.tostring(tp2Mult)
+    g = ',"rsi":' + fmt(rsi) + ',"adx":' + fmt(adx) + ',"atr":' + fmt(atr) + ',"atr_pct":' + fmt(atr / close * 100.0)
+    h = ',"fast_ema":' + fmt(fastEma) + ',"slow_ema":' + fmt(slowEma) + ',"vwap":' + fmt(vwapVal) + ',"daily_ema":' + fmt(dailyEma)
+    i = ',"swing_anchor":' + fmt(swingAnchor) + ',"time_stop_bars":' + str.tostring(timeStopBars)
+    j = ',"session":"' + sessionTag + '","regime":"' + regimeTag + '","daily_dist_pct":' + fmt(dailyDistPct)
+    k = ',"volume":' + fmt(volume) + ',"volume_ma":' + fmt(volMa) + '}'
+    a + b + c + d + e + f + g + h + i + j + k
+
+if longSignal
+    alert(makePayload("BUY",  close, longEntryLow,  longEntryHigh,  longSL,  longTp1,  longTp2,  longR,  longRiskPct,  longSwingAnchor),  alert.freq_once_per_bar_close)
+
+if shortSignal
+    alert(makePayload("SELL", close, shortEntryLow, shortEntryHigh, shortSL, shortTp1, shortTp2, shortR, shortRiskPct, shortSwingAnchor), alert.freq_once_per_bar_close)
+
+// =====================================================
+// === NO_TRADE heartbeat with reason codes
+// =====================================================
+hasAnySignal = longSignal or shortSignal
+
+// Reason flags (only meaningful when no signal fires)
+ntRegimeFlat   = regimeFlat
+ntRegimeMismatch = (regimeUp and shortTrigger) or (regimeDown and longCrossActive)
+ntNoCrossLong  = regimeUp   and not longCrossActive
+ntNoReclaimShort = regimeDown and not shortTrigger
+ntWeakTrend    = (longCrossActive or shortTrigger) and not trendStrong
+ntLowVolume    = (longCrossActive or shortTrigger) and not volOk
+ntRsiOut       = (regimeUp and longCrossActive and not rsiLongOk) or (regimeDown and shortTrigger and not rsiShortOk)
+ntVwapLong     = regimeUp and longCrossActive and not vwapLongOk
+ntSessionOff   = useSessionFilter and not sessionOk
+ntCooldown     = (longCrossActive or shortTrigger) and not canSignal
+ntRclamp       = (regimeUp and longCrossActive and not longRok) or (regimeDown and shortTrigger and not shortRok)
+
+boolStr(bool b) => b ? "true" : "false"
+
+makeNoTradePayload() =>
+    a = '{"secret":"' + secret + '","source":"' + botName + '","signal":"NO_TRADE","signal_type":"intraday"'
+    b = ',"symbol":"' + syminfo.ticker + '","exchange":"' + syminfo.prefix + '","interval":"' + timeframe.period + '","timeframe":"' + timeframe.period + '"'
+    c = ',"time":' + str.tostring(time) + ',"bar_time":' + str.tostring(time) + ',"price":' + fmt(close)
+    d = ',"reasons":{'
+        + '"regime_flat":'      + boolStr(ntRegimeFlat)
+        + ',"regime_mismatch":' + boolStr(ntRegimeMismatch)
+        + ',"no_cross":'        + boolStr(ntNoCrossLong)
+        + ',"no_reclaim":'      + boolStr(ntNoReclaimShort)
+        + ',"weak_trend":'      + boolStr(ntWeakTrend)
+        + ',"low_volume":'      + boolStr(ntLowVolume)
+        + ',"rsi_out":'         + boolStr(ntRsiOut)
+        + ',"vwap_long":'       + boolStr(ntVwapLong)
+        + ',"session_off":'     + boolStr(ntSessionOff)
+        + ',"cooldown":'        + boolStr(ntCooldown)
+        + ',"r_clamp":'         + boolStr(ntRclamp)
+        + '}'
+    e = ',"rsi":' + fmt(rsi) + ',"adx":' + fmt(adx) + ',"atr":' + fmt(atr) + ',"atr_pct":' + fmt(atr / close * 100.0)
+    f = ',"vwap":' + fmt(vwapVal) + ',"daily_ema":' + fmt(dailyEma) + ',"daily_dist_pct":' + fmt(dailyDistPct)
+    g = ',"regime":"' + regimeTag + '","session":"' + sessionTag + '"'
+    h = ',"volume":' + fmt(volume) + ',"volume_ma":' + fmt(volMa) + ',"hour_bkk":' + str.tostring(currentHourBkk) + '}'
+    a + b + c + d + e + f + g + h
+
+if enableNoTradeAlert and barstate.isconfirmed and not hasAnySignal
+    alert(makeNoTradePayload(), alert.freq_once_per_bar_close)
+
+// =====================================================
+// === Plotting
+// =====================================================
+plot(vwapVal,  "VWAP",      color=color.new(color.fuchsia, 0), linewidth=2)
+plot(fastEma,  "Fast EMA",  color=color.new(color.aqua, 0))
+plot(slowEma,  "Slow EMA",  color=color.new(color.orange, 0))
+plot(dailyEma, "Daily EMA", color=color.new(color.red, 0), style=plot.style_stepline, linewidth=2)
+
+regimeColor = regimeUp ? color.new(color.lime, 88) : regimeDown ? color.new(color.red, 88) : color.new(color.gray, 92)
+bgcolor(regimeColor, title="Regime tint")
+
+plotshape(longSignal,  title="LONG signal",  style=shape.triangleup,   location=location.belowbar, color=color.new(color.lime, 0), size=size.small, text="BUY",  textcolor=color.white)
+plotshape(shortSignal, title="SHORT signal", style=shape.triangledown, location=location.abovebar, color=color.new(color.red, 0),  size=size.small, text="SELL", textcolor=color.white)
+
+// =====================================================
+// === Status table
+// =====================================================
+var table info = table.new(position.top_right, 2, 14, border_width=1)
+if barstate.islast
+    regimeLabel  = regimeUp ? "UP — LONG armed" : regimeDown ? "DOWN — SHORT armed" : "FLAT — NO_TRADE"
+    regimeColor2 = regimeUp ? color.lime : regimeDown ? color.red : color.gray
+    posLabel     = longSignal ? "🟢 BUY THIS BAR" : shortSignal ? "🔴 SELL THIS BAR" : "—"
+
+    table.cell(info, 0, 0,  "v4 Intraday (live)", text_color=color.white, text_size=size.small, bgcolor=color.new(color.teal, 60))
+    table.cell(info, 1, 0,  syminfo.ticker + " " + timeframe.period, text_color=color.white, text_size=size.small, bgcolor=color.new(color.teal, 60))
+    table.cell(info, 0, 1,  "Signal",          text_color=color.silver, text_size=size.small)
+    table.cell(info, 1, 1,  posLabel,          text_color=hasAnySignal ? color.yellow : color.gray, text_size=size.small)
+    table.cell(info, 0, 2,  "Regime",          text_color=color.silver, text_size=size.small)
+    table.cell(info, 1, 2,  regimeLabel,       text_color=regimeColor2, text_size=size.small)
+    table.cell(info, 0, 3,  "Daily Δ %",       text_color=color.silver, text_size=size.small)
+    table.cell(info, 1, 3,  str.tostring(dailyDistPct, "#.##") + "%",
+                            text_color=regimeUp ? color.lime : regimeDown ? color.red : color.gray, text_size=size.small)
+    table.cell(info, 0, 4,  "ADX (≥" + str.tostring(adxMin) + ")", text_color=color.silver, text_size=size.small)
+    table.cell(info, 1, 4,  str.tostring(adx, "#.#"), text_color=trendStrong ? color.lime : color.gray, text_size=size.small)
+    table.cell(info, 0, 5,  "RSI",             text_color=color.silver, text_size=size.small)
+    table.cell(info, 1, 5,  str.tostring(rsi, "#.#"), text_color=color.white, text_size=size.small)
+    table.cell(info, 0, 6,  "VWAP Δ %",        text_color=color.silver, text_size=size.small)
+    table.cell(info, 1, 6,  str.tostring((close - vwapVal) / close * 100.0, "#.##") + "%",
+                            text_color=close > vwapVal ? color.lime : color.red, text_size=size.small)
+    table.cell(info, 0, 7,  "Vol × MA",        text_color=color.silver, text_size=size.small)
+    table.cell(info, 1, 7,  str.tostring(volume / volMa, "#.##") + "×",
+                            text_color=volOk ? color.lime : color.gray, text_size=size.small)
+    table.cell(info, 0, 8,  "Bars over VWAP",  text_color=color.silver, text_size=size.small)
+    table.cell(info, 1, 8,  str.tostring(barsOverVwap), text_color=color.white, text_size=size.small)
+    table.cell(info, 0, 9,  "Session",         text_color=color.silver, text_size=size.small)
+    table.cell(info, 1, 9,  sessionTag,        text_color=inUsSession ? color.lime : color.gray, text_size=size.small)
+    table.cell(info, 0, 10, "Cooldown",        text_color=color.silver, text_size=size.small)
+    table.cell(info, 1, 10, na(lastSignalBar) ? "ready" : str.tostring(math.max(0, cooldownBars - (bar_index - lastSignalBar))) + " bars",
+                            text_color=canSignal ? color.lime : color.gray, text_size=size.small)
+    table.cell(info, 0, 11, "TP1 / TP2 R",     text_color=color.silver, text_size=size.small)
+    table.cell(info, 1, 11, str.tostring(tp1Mult, "#.#") + " / " + str.tostring(tp2Mult, "#.#"), text_color=color.white, text_size=size.small)
+    table.cell(info, 0, 12, "Time-stop",       text_color=color.silver, text_size=size.small)
+    table.cell(info, 1, 12, timeStopBars > 0 ? str.tostring(timeStopBars) + " bars" : "off", text_color=color.white, text_size=size.small)
+    table.cell(info, 0, 13, "Neutral band",    text_color=color.silver, text_size=size.small)
+    table.cell(info, 1, 13, "±" + str.tostring(neutralBandPct, "#.##") + "%", text_color=color.white, text_size=size.small)
+
+// =====================================================
+// === Legacy alertcondition (for users who want named alerts)
+// =====================================================
+alertcondition(longSignal,  title="Intraday v4 BUY",  message="BUY signal generated. Use 'Any alert() function call' for JSON webhook payload.")
+alertcondition(shortSignal, title="Intraday v4 SELL", message="SELL signal generated. Use 'Any alert() function call' for JSON webhook payload.")

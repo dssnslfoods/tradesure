@@ -77,18 +77,23 @@ supabase/migrations/        ← SQL migrations (apply via Supabase MCP / dashboa
 
 | File | Type | Purpose | Plan tag |
 |---|---|---|---|
-| `pine/btc_futures_signal_v2.pine` | `indicator()` v2.1.1 | **Live** — fires `alert()` JSON payloads to webhook | `swing` |
-| `pine/btc_futures_strategy_v1.pine` | `strategy()` v1.3 | **Backtest only** — Strategy Tester for swing | swing |
-| `pine/btc_futures_strategy_v3.pine` | `strategy()` v3 | **Backtest only — ABORTED (EMA cross)** | intraday (would-be) |
-| `pine/btc_futures_strategy_v3_5.pine` | `strategy()` v3.5 | **Backtest only — ABORTED (VWAP reclaim)** | intraday (would-be) |
-| `pine/v3_design.md` + `v3_backtest_results.md` | docs | v3 design + post-mortem | — |
-| `pine/v3_5_design.md` + `v3_5_backtest_results.md` | docs | v3.5 design + post-mortem (final abort) | — |
+| `pine/btc_futures_signal_v2.pine` | `indicator()` v2.1.1 | **Live** — Swing 1H webhook signals | `swing` |
+| `pine/btc_futures_signal_v4.pine` | `indicator()` v4 | **Live** — Intraday 15m webhook signals (regime-gated) | `intraday` |
+| `pine/btc_futures_strategy_v1.pine` | `strategy()` v1.3 | Backtest only — swing companion | swing |
+| `pine/btc_futures_strategy_v4.pine` | `strategy()` v4 | Backtest only — intraday companion | intraday |
+| `pine/btc_futures_strategy_v3.pine` | `strategy()` v3 | Backtest only — ABORTED (EMA cross) | — |
+| `pine/btc_futures_strategy_v3_5.pine` | `strategy()` v3.5 | Backtest only — ABORTED (VWAP reclaim) | — |
+| `pine/v3_design.md` + `v3_backtest_results.md` | docs | v3 post-mortem | — |
+| `pine/v3_5_design.md` + `v3_5_backtest_results.md` | docs | v3.5 post-mortem | — |
+| `pine/v4_backtest_results.md` | docs | v4 backtest + promotion rationale | — |
 
-**v2.1.1 + v1.3 share the same trading logic** (EMA crosses, ADX, ATR-based SL/TP). Strategy mirrors indicator so backtest results approximate live performance.
+**v2.1.1 + v1.3 share the same trading logic** (EMA crosses, ADX, ATR-based SL/TP). **v4 indicator + v4 strategy share regime-gated asymmetric logic** (LONG via EMA cross in Daily UP regime; SHORT via VWAP reclaim in Daily DOWN regime). Strategy files mirror indicators so backtest approximates live.
 
-The live indicator is **symbol-agnostic**: uses `syminfo.ticker` + `request.security(syminfo.tickerid, "D", …)`. One Pine code, N TradingView alerts (one per symbol+TF). All alerts point to `/api/webhook/tradingview`.
+Live indicators are **symbol-agnostic**: use `syminfo.ticker` + `request.security(syminfo.tickerid, "D", …)`. One Pine code per plan, N TradingView alerts (one per symbol+TF). All alerts point to `/api/webhook/tradingview`.
 
-**Intraday plan status**: 🛑 **Final abort 2026-05-14** after 9 backtest variants across 2 fundamentally different entry patterns (EMA cross + VWAP reclaim) — all failed acceptance (PF ceiling 0.754, target ≥1.1). See `pine/v3_backtest_results.md` and `pine/v3_5_backtest_results.md` for details. Multi-plan infrastructure (Phase 1a+1b) is preserved — admin can re-enable `intraday` plan via dashboard if/when a future redesign ships. Default is `active_trading_plans: ["swing"]`. Re-attempt conditions documented in `v3_5_backtest_results.md` §6.
+**Plan status (2026-05-14)**:
+- 🟢 **Swing (v2.1.1)** — LIVE, proven. PF 1.31 with Daily filter on 16mo BTC 1H backtest.
+- 🟢 **Intraday (v4)** — LIVE after 11 backtest iterations. PF 2.75 in Test K (Jan-May 2026 BTC 15m, 12 trades, WR 58%, DD 0.21%). **LONG side untested** — period was 100% bear regime. First 30 days of live data treated as Phase 3 validation (see `pine/v4_backtest_results.md` §5). Admin can disable the plan in one click via dashboard if metrics deviate.
 
 ---
 

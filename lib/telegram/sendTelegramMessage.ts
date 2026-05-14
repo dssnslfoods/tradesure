@@ -262,6 +262,7 @@ interface NoTradePayload {
   volume?: string | number;
   volume_ma?: string | number;
   reasons?: {
+    // Shared (v2.1 swing + v4 intraday)
     no_cross?: boolean;
     weak_trend?: boolean;
     low_volume?: boolean;
@@ -271,6 +272,13 @@ interface NoTradePayload {
     rsi_out?: boolean;
     htf_misalign?: boolean;
     daily_misalign?: boolean;
+    // v4 intraday-specific reasons
+    regime_flat?: boolean;
+    regime_mismatch?: boolean;
+    no_reclaim?: boolean;
+    vwap_long?: boolean;
+    session_off?: boolean;
+    r_clamp?: boolean;
   };
 }
 
@@ -284,6 +292,13 @@ const REASON_LABELS_TH: Record<keyof NonNullable<NoTradePayload["reasons"]>, str
   rsi_out:        "RSI อยู่นอกโซนเข้า",
   htf_misalign:   "Higher-TF trend ไม่สอดคล้อง",
   daily_misalign: "ทิศ signal สวน Daily trend (regime gate)",
+  // v4 intraday labels
+  regime_flat:     "Daily regime ใกล้ EMA200 (NO_TRADE — รอ direction ชัด)",
+  regime_mismatch: "Setup สวน Daily regime (ไม่เข้า — ผิดทิศ)",
+  no_reclaim:      "ไม่มี VWAP reclaim (รอ setup SHORT)",
+  vwap_long:       "Setup LONG แต่ราคาใต้ VWAP (เลื่อนรอ reclaim)",
+  session_off:     "นอกช่วง trade session (US session filter)",
+  r_clamp:         "Swing distance ใหญ่เกิน 3× ATR (flush ลึก — ข้าม)",
 };
 
 function fmtBangkokTime(t: string | number | undefined): string {
