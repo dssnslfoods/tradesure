@@ -1,0 +1,284 @@
+//@version=6
+// =====================================================
+// BTC TF30 Scalp Strategy — Backtest companion
+//
+// Strategy version of pine/btc_tf30_scalp_signal.pine. Same entry logic
+// (EMA 9/21/100 cross + RSI + ATR + volume filter) but runs in TradingView
+// Strategy Tester so admin can measure historical performance.
+//
+// Use this BEFORE relying on the live indicator — backtest 12-16 months of
+// BTC 30m bars, look at PF / WR / Max DD, then decide whether to keep the
+// "scalp30" plan active in the Tradesure dashboard.
+//
+// Acceptance bar (matches v3/v4 standard):
+//   - Trades ≥ 80 over the available data range
+//   - Profit Factor ≥ 1.1
+//   - LONG PF ≥ 1.0 AND SHORT PF ≥ 1.0 (symmetric — both sides have edge)
+//   - Win rate ≥ 45%
+//   - Max DD ≤ 25%
+//   - Avg trade duration ≤ 16 bars (8 hours on 30m)
+//
+// Position sizing: 25% of equity, no pyramiding (matches v1.3/v4 methodology
+// so results compare apples-to-apples).
+// =====================================================
+strategy("BTC TF30 Scalp Strategy (backtest)",
+     overlay=true,
+     initial_capital=10000,
+     default_qty_type=strategy.percent_of_equity,
+     default_qty_value=25,
+     commission_type=strategy.commission.percent,
+     commission_value=0.04,
+     slippage=2,
+     pyramiding=0,
+     calc_on_every_tick=false,
+     process_orders_on_close=true,
+     max_labels_count=500,
+     max_bars_back=2000)
+
+// =====================================================
+// === Inputs (match the live indicator one-to-one)
+// =====================================================
+grpCore = "Strategy"
+fastEmaLength   = input.int(9,   "Fast EMA",   minval=1, group=grpCore)
+slowEmaLength   = input.int(21,  "Slow EMA",   minval=1, group=grpCore)
+trendEmaLength  = input.int(100, "Trend EMA",  minval=1, group=grpCore)
+rsiLength       = input.int(14,  "RSI Length", minval=1, group=grpCore)
+rsiLongMin      = input.float(53.0, "RSI minimum for LONG",  minval=0, maxval=100, group=grpCore)
+rsiShortMax     = input.float(47.0, "RSI maximum for SHORT", minval=0, maxval=100, group=grpCore)
+
+grpRisk = "Risk"
+atrLength       = input.int(14,  "ATR Length",         minval=1, group=grpRisk)
+atrStopMult     = input.float(1.3, "SL ATR multiplier", minval=0.1, step=0.1, group=grpRisk)
+tp1Mult         = input.float(1.5, "TP1 R-multiple", minval=0.1, step=0.1, group=grpRisk)
+tp2Mult         = input.float(2.5, "TP2 R-multiple (runner)", minval=0.1, step=0.1, group=grpRisk)
+timeStopBars    = input.int(16, "Time-stop bars (0 = off)", minval=0, group=grpRisk,
+     tooltip="16 bars × 30m = 8 hours. Close at market if no TP1 by then.")
+
+grpFilter = "Filters"
+useVolumeFilter = input.bool(true, "Use volume filter",     group=grpFilter)
+volumeLength    = input.int(20,    "Volume SMA Length",      minval=1, group=grpFilter)
+cooldownBars    = input.int(2,     "Cooldown bars (anti-chop)", minval=0, group=grpFilter)
+enableLong      = input.bool(true, "Enable LONG entries",   group=grpFilter)
+enableShort     = input.bool(true, "Enable SHORT entries",  group=grpFilter)
+
+grpExit = "Exit"
+exitMode = input.string("Full exit at TP1",
+     "Exit mode", options=["Full exit at TP1", "TP1→TP2 (50% partial + runner, SL→BE)"], group=grpExit,
+     tooltip="Start with Full Exit (simpler). If PF passes acceptance, try Partial+Runner.")
+
+// =====================================================
+// === Indicators
+// =====================================================
+fastEma   = ta.ema(close, fastEmaLength)
+slowEma   = ta.ema(close, slowEmaLength)
+trendEma  = ta.ema(close, trendEmaLength)
+rsi       = ta.rsi(close, rsiLength)
+atr       = ta.atr(atrLength)
+volumeSma = ta.sma(volume, volumeLength)
+
+volumeOk  = not useVolumeFilter or volume > volumeSma
+
+// =====================================================
+// === Entry conditions
+// =====================================================
+longRaw  = ta.crossover(fastEma, slowEma)  and close > trendEma and rsi >= rsiLongMin
+shortRaw = ta.crossunder(fastEma, slowEma) and close < trendEma and rsi <= rsiShortMax
+
+// Cooldown
+var int lastSignalBar = na
+canSignal = na(lastSignalBar) or (bar_index - lastSignalBar) >= cooldownBars
+
+longSetup  = enableLong  and longRaw  and volumeOk and canSignal
+shortSetup = enableShort and shortRaw and volumeOk and canSignal
+
+// =====================================================
+// === Trade plan
+// =====================================================
+longSl   = close - atr * atrStopMult
+longRisk = close - longSl
+longTp1  = close + longRisk * tp1Mult
+longTp2  = close + longRisk * tp2Mult
+
+shortSl   = close + atr * atrStopMult
+shortRisk = shortSl - close
+shortTp1  = close - shortRisk * tp1Mult
+shortTp2  = close - shortRisk * tp2Mult
+
+// =====================================================
+// === Position state
+// =====================================================
+var float curEntry = na
+var float curSL    = na
+var float curTp1   = na
+var float curTp2   = na
+var bool  tp1Done  = false
+var int   posDir   = 0
+var int   posBar   = na
+
+useRunner = exitMode == "TP1→TP2 (50% partial + runner, SL→BE)"
+
+// =====================================================
+// === EXIT LOGIC (manual OHLC checks — proven pattern)
+// =====================================================
+if posDir == 1 and strategy.position_size > 0
+    slHit  = low  <= curSL
+    tp1Hit = high >= curTp1
+    tp2Hit = high >= curTp2
+    barsIn = bar_index - posBar
+
+    if useRunner
+        if not tp1Done
+            if slHit
+                strategy.close("L", comment="SL")
+                posDir := 0
+            else if tp1Hit
+                strategy.close("L", qty_percent=50, comment="TP1")
+                tp1Done := true
+                curSL   := curEntry
+            else if timeStopBars > 0 and barsIn >= timeStopBars
+                strategy.close("L", comment="TimeStop")
+                posDir := 0
+        else
+            if slHit
+                strategy.close("L", comment="BE")
+                posDir  := 0
+                tp1Done := false
+            else if tp2Hit
+                strategy.close("L", comment="TP2")
+                posDir  := 0
+                tp1Done := false
+            else if timeStopBars > 0 and barsIn >= timeStopBars * 2
+                strategy.close("L", comment="TimeStop-Runner")
+                posDir  := 0
+                tp1Done := false
+    else
+        if slHit
+            strategy.close("L", comment="SL")
+            posDir := 0
+        else if tp1Hit
+            strategy.close("L", comment="TP1")
+            posDir := 0
+        else if timeStopBars > 0 and barsIn >= timeStopBars
+            strategy.close("L", comment="TimeStop")
+            posDir := 0
+
+if posDir == -1 and strategy.position_size < 0
+    slHit  = high >= curSL
+    tp1Hit = low  <= curTp1
+    tp2Hit = low  <= curTp2
+    barsIn = bar_index - posBar
+
+    if useRunner
+        if not tp1Done
+            if slHit
+                strategy.close("S", comment="SL")
+                posDir := 0
+            else if tp1Hit
+                strategy.close("S", qty_percent=50, comment="TP1")
+                tp1Done := true
+                curSL   := curEntry
+            else if timeStopBars > 0 and barsIn >= timeStopBars
+                strategy.close("S", comment="TimeStop")
+                posDir := 0
+        else
+            if slHit
+                strategy.close("S", comment="BE")
+                posDir  := 0
+                tp1Done := false
+            else if tp2Hit
+                strategy.close("S", comment="TP2")
+                posDir  := 0
+                tp1Done := false
+            else if timeStopBars > 0 and barsIn >= timeStopBars * 2
+                strategy.close("S", comment="TimeStop-Runner")
+                posDir  := 0
+                tp1Done := false
+    else
+        if slHit
+            strategy.close("S", comment="SL")
+            posDir := 0
+        else if tp1Hit
+            strategy.close("S", comment="TP1")
+            posDir := 0
+        else if timeStopBars > 0 and barsIn >= timeStopBars
+            strategy.close("S", comment="TimeStop")
+            posDir := 0
+
+if strategy.position_size == 0 and posDir != 0
+    posDir  := 0
+    tp1Done := false
+
+// =====================================================
+// === ENTRIES
+// =====================================================
+if longSetup and posDir == 0
+    strategy.entry("L", strategy.long)
+    curEntry      := close
+    curSL         := longSl
+    curTp1        := longTp1
+    curTp2        := longTp2
+    tp1Done       := false
+    posDir        := 1
+    posBar        := bar_index
+    lastSignalBar := bar_index
+
+if shortSetup and posDir == 0
+    strategy.entry("S", strategy.short)
+    curEntry      := close
+    curSL         := shortSl
+    curTp1        := shortTp1
+    curTp2        := shortTp2
+    tp1Done       := false
+    posDir        := -1
+    posBar        := bar_index
+    lastSignalBar := bar_index
+
+// =====================================================
+// === Plotting
+// =====================================================
+plot(fastEma,  "Fast EMA",  color=color.new(color.teal,   0), linewidth=2)
+plot(slowEma,  "Slow EMA",  color=color.new(color.orange, 0), linewidth=2)
+plot(trendEma, "Trend EMA", color=color.new(color.gray,   0), linewidth=2)
+plotshape(longSetup,  title="LONG",  style=shape.triangleup,   location=location.belowbar, color=color.new(color.lime, 0), size=size.small)
+plotshape(shortSetup, title="SHORT", style=shape.triangledown, location=location.abovebar, color=color.new(color.red,  0), size=size.small)
+
+// =====================================================
+// === Status table
+// =====================================================
+var table info = table.new(position.top_right, 2, 14, border_width=1)
+if barstate.islast
+    decided  = strategy.wintrades + strategy.losstrades
+    winRate  = decided > 0 ? strategy.wintrades / decided * 100.0 : 0.0
+    pf       = strategy.grossloss > 0 ? strategy.grossprofit / strategy.grossloss : 0.0
+
+    table.cell(info, 0, 0,  "TF30 Scalp Strategy", text_color=color.white, text_size=size.small, bgcolor=color.new(color.green, 70))
+    table.cell(info, 1, 0,  syminfo.ticker + " " + timeframe.period, text_color=color.white, text_size=size.small, bgcolor=color.new(color.green, 70))
+    table.cell(info, 0, 1,  "Trades",         text_color=color.silver, text_size=size.small)
+    table.cell(info, 1, 1,  str.tostring(strategy.closedtrades), text_color=color.white, text_size=size.small)
+    table.cell(info, 0, 2,  "Win rate",       text_color=color.silver, text_size=size.small)
+    table.cell(info, 1, 2,  decided > 0 ? str.tostring(winRate, "#.#") + "%" : "—",
+                            text_color=winRate >= 50 ? color.lime : color.red, text_size=size.small)
+    table.cell(info, 0, 3,  "PF",             text_color=color.silver, text_size=size.small)
+    table.cell(info, 1, 3,  strategy.closedtrades > 0 ? str.tostring(pf, "#.##") : "—",
+                            text_color=pf >= 1.5 ? color.lime : pf >= 1.0 ? color.yellow : color.red, text_size=size.small)
+    table.cell(info, 0, 4,  "Fast/Slow EMA",  text_color=color.silver, text_size=size.small)
+    table.cell(info, 1, 4,  str.tostring(fastEmaLength) + " / " + str.tostring(slowEmaLength), text_color=color.white, text_size=size.small)
+    table.cell(info, 0, 5,  "Trend EMA",      text_color=color.silver, text_size=size.small)
+    table.cell(info, 1, 5,  str.tostring(trendEmaLength), text_color=color.white, text_size=size.small)
+    table.cell(info, 0, 6,  "RSI L / S",      text_color=color.silver, text_size=size.small)
+    table.cell(info, 1, 6,  "≥" + str.tostring(rsiLongMin, "#.#") + " / ≤" + str.tostring(rsiShortMax, "#.#"), text_color=color.white, text_size=size.small)
+    table.cell(info, 0, 7,  "SL × ATR",       text_color=color.silver, text_size=size.small)
+    table.cell(info, 1, 7,  str.tostring(atrStopMult, "#.#"), text_color=color.white, text_size=size.small)
+    table.cell(info, 0, 8,  "TP1 / TP2 R",    text_color=color.silver, text_size=size.small)
+    table.cell(info, 1, 8,  str.tostring(tp1Mult, "#.#") + " / " + str.tostring(tp2Mult, "#.#"), text_color=color.white, text_size=size.small)
+    table.cell(info, 0, 9,  "Time-stop",      text_color=color.silver, text_size=size.small)
+    table.cell(info, 1, 9,  timeStopBars > 0 ? str.tostring(timeStopBars) + " bars" : "off", text_color=color.white, text_size=size.small)
+    table.cell(info, 0, 10, "Cooldown",       text_color=color.silver, text_size=size.small)
+    table.cell(info, 1, 10, str.tostring(cooldownBars) + " bars", text_color=color.white, text_size=size.small)
+    table.cell(info, 0, 11, "Exit mode",      text_color=color.silver, text_size=size.small)
+    table.cell(info, 1, 11, useRunner ? "Partial+Runner" : "Full Exit", text_color=color.white, text_size=size.small)
+    table.cell(info, 0, 12, "Volume filter",  text_color=color.silver, text_size=size.small)
+    table.cell(info, 1, 12, useVolumeFilter ? "ON" : "OFF", text_color=color.white, text_size=size.small)
+    table.cell(info, 0, 13, "Position",       text_color=color.silver, text_size=size.small)
+    table.cell(info, 1, 13, posDir == 1 ? "LONG" : posDir == -1 ? "SHORT" : "flat",
+                            text_color=posDir == 0 ? color.gray : color.white, text_size=size.small)
