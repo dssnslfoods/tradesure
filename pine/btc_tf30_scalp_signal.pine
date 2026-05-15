@@ -1,0 +1,175 @@
+//@version=6
+// =====================================================
+// BTC TF30 Scalp LONG/SHORT Webhook (admin custom)
+//
+// Custom Pine — registers itself as trading plan "scalp30" in the
+// Tradesure master-data catalog. Admin must first add the plan via
+// /dashboard/schedule → Manage plans catalog → key="scalp30".
+//
+// Original author's logic preserved (EMA 9/21/100 cross + RSI + ATR
+// + volume filter). Field mapping aligned to Tradesure webhook spec:
+//   - "signal_type":"scalp30" (routes to admin-defined plan)
+//   - signal values "BUY"/"SELL" (match v2.1.1/v4 convention)
+//   - required webhook fields: time, interval
+//   - mapped fields: stop_loss, take_profit, tp1, tp2, entry_low,
+//     entry_high, atr_pct (so dashboard renders trade plan correctly)
+//
+// Intended chart: BTCUSDT 30m
+// TradingView alert sub-condition: "Any alert() function call"
+// Webhook URL: https://tradesure.d2infinite.com/api/webhook/tradingview
+// =====================================================
+indicator("BTC TF30 Scalp LONG/SHORT Webhook", overlay=true, max_labels_count=500)
+
+// -----------------------------
+// Inputs
+// -----------------------------
+grpCore = "Strategy"
+fastEmaLength   = input.int(9,   "Fast EMA",   minval=1, group=grpCore)
+slowEmaLength   = input.int(21,  "Slow EMA",   minval=1, group=grpCore)
+trendEmaLength  = input.int(100, "Trend EMA",  minval=1, group=grpCore)
+rsiLength       = input.int(14,  "RSI Length", minval=1, group=grpCore)
+rsiLongMin      = input.float(53.0, "RSI minimum for LONG",  minval=0, maxval=100, group=grpCore)
+rsiShortMax     = input.float(47.0, "RSI maximum for SHORT", minval=0, maxval=100, group=grpCore)
+
+grpRisk = "Risk"
+atrLength       = input.int(14,  "ATR Length",         minval=1, group=grpRisk)
+atrStopMult     = input.float(1.3, "SL ATR multiplier", minval=0.1, step=0.1, group=grpRisk)
+riskReward      = input.float(1.5, "Risk:Reward (TP1)", minval=0.1, step=0.1, group=grpRisk)
+tp2RR           = input.float(2.5, "Risk:Reward (TP2 runner)", minval=0.1, step=0.1, group=grpRisk)
+entryZoneAtrMult= input.float(0.3, "Entry zone × ATR (half-width)", minval=0.05, step=0.05, group=grpRisk)
+
+grpFilter = "Filters"
+useVolumeFilter = input.bool(true, "Use volume filter",  group=grpFilter)
+volumeLength    = input.int(20,    "Volume SMA Length", minval=1, group=grpFilter)
+useConfirmedBar = input.bool(true, "Alert only after candle close", group=grpFilter)
+enableLong      = input.bool(true, "Enable LONG alerts", group=grpFilter)
+enableShort     = input.bool(true, "Enable SHORT alerts", group=grpFilter)
+
+grpWebhook = "Webhook"
+secret          = input.string("",                 "Webhook secret", group=grpWebhook, confirm=true,
+     tooltip="Must match TRADINGVIEW_WEBHOOK_SECRET on backend.")
+sourceName      = input.string("btc-tf30-scalp",   "Source name",  group=grpWebhook)
+priceDecimals   = input.int(2, "Price decimals in payload", minval=0, maxval=8, group=grpWebhook)
+enableNoTradeAlert = input.bool(true, "Send NO_TRADE heartbeat each bar", group=grpWebhook,
+     tooltip="Lets backend confirm bot is alive. Backend env NOTRADE_TELEGRAM=0 suppresses Telegram broadcast of these.")
+
+grpDebug = "Debug"
+testAlert       = input.bool(false, "Send TEST alert every candle close (debug only — flood risk)", group=grpDebug)
+
+// -----------------------------
+// Calculations
+// -----------------------------
+fastEma    = ta.ema(close, fastEmaLength)
+slowEma    = ta.ema(close, slowEmaLength)
+trendEma   = ta.ema(close, trendEmaLength)
+rsi        = ta.rsi(close, rsiLength)
+atr        = ta.atr(atrLength)
+volumeSma  = ta.sma(volume, volumeLength)
+atrPct     = atr / close * 100.0
+
+barReady   = useConfirmedBar ? barstate.isconfirmed : true
+volumeOk   = useVolumeFilter ? volume > volumeSma : true
+
+longRaw    = ta.crossover(fastEma, slowEma)  and close > trendEma and rsi >= rsiLongMin
+shortRaw   = ta.crossunder(fastEma, slowEma) and close < trendEma and rsi <= rsiShortMax
+
+longSignal  = enableLong  and barReady and volumeOk and longRaw
+shortSignal = enableShort and barReady and volumeOk and shortRaw
+
+// -----------------------------
+// Trade plan (dual TP for system compatibility)
+// -----------------------------
+longSl   = close - atr * atrStopMult
+longRisk = close - longSl
+longTp1  = close + longRisk * riskReward
+longTp2  = close + longRisk * tp2RR
+longEntryLow  = close - atr * entryZoneAtrMult
+longEntryHigh = close + atr * entryZoneAtrMult
+longRiskPct   = longRisk / close * 100.0
+longReward    = longTp1 - close
+
+shortSl   = close + atr * atrStopMult
+shortRisk = shortSl - close
+shortTp1  = close - shortRisk * riskReward
+shortTp2  = close - shortRisk * tp2RR
+shortEntryLow  = close - atr * entryZoneAtrMult
+shortEntryHigh = close + atr * entryZoneAtrMult
+shortRiskPct   = shortRisk / close * 100.0
+shortReward    = close - shortTp1
+
+// -----------------------------
+// Plots
+// -----------------------------
+plot(fastEma,  "Fast EMA",  color=color.new(color.teal,   0), linewidth=2)
+plot(slowEma,  "Slow EMA",  color=color.new(color.orange, 0), linewidth=2)
+plot(trendEma, "Trend EMA", color=color.new(color.gray,   0), linewidth=2)
+
+plotshape(longSignal,  title="LONG",  style=shape.labelup,   location=location.belowbar, color=color.new(color.green, 0), text="BUY",  textcolor=color.white, size=size.small)
+plotshape(shortSignal, title="SHORT", style=shape.labeldown, location=location.abovebar, color=color.new(color.red,   0), text="SELL", textcolor=color.white, size=size.small)
+
+// -----------------------------
+// JSON helpers
+// -----------------------------
+fmt(float x) => str.tostring(math.round(x * math.pow(10, priceDecimals)) / math.pow(10, priceDecimals))
+boolStr(bool b) => b ? "true" : "false"
+
+makePayload(string sig, float entry, float eLow, float eHigh, float sl, float tp1v, float tp2v, float rAbs, float rPct, float rewardAbs) =>
+    a = '{"secret":"' + secret + '","source":"' + sourceName + '","signal":"' + sig + '","signal_type":"scalp30"'
+    b = ',"strategy":"TF30_SCALP_EMA_RSI_ATR","symbol":"' + syminfo.ticker + '","exchange":"' + syminfo.prefix + '","interval":"' + timeframe.period + '","timeframe":"' + timeframe.period + '"'
+    c = ',"time":' + str.tostring(time) + ',"bar_time":' + str.tostring(time) + ',"price":' + fmt(close)
+    d = ',"entry":' + fmt(entry) + ',"entry_low":' + fmt(eLow) + ',"entry_high":' + fmt(eHigh)
+    e = ',"stop_loss":' + fmt(sl) + ',"take_profit":' + fmt(tp1v) + ',"tp1":' + fmt(tp1v) + ',"tp2":' + fmt(tp2v) + ',"sl":' + fmt(sl)
+    f = ',"risk":' + fmt(rAbs) + ',"reward":' + fmt(rewardAbs) + ',"risk_percent":' + fmt(rPct) + ',"risk_reward_ratio":' + str.tostring(riskReward)
+    g = ',"rsi":' + fmt(rsi) + ',"atr":' + fmt(atr) + ',"atr_pct":' + fmt(atrPct)
+    h = ',"fast_ema":' + fmt(fastEma) + ',"slow_ema":' + fmt(slowEma) + ',"trend_ema":' + fmt(trendEma)
+    i = ',"volume":' + fmt(volume) + ',"volume_ma":' + fmt(volumeSma) + '}'
+    a + b + c + d + e + f + g + h + i
+
+// -----------------------------
+// Signal alerts
+// -----------------------------
+if longSignal
+    alert(makePayload("BUY",  close, longEntryLow,  longEntryHigh,  longSl,  longTp1,  longTp2,  longRisk,  longRiskPct,  longReward),  alert.freq_once_per_bar_close)
+
+if shortSignal
+    alert(makePayload("SELL", close, shortEntryLow, shortEntryHigh, shortSl, shortTp1, shortTp2, shortRisk, shortRiskPct, shortReward), alert.freq_once_per_bar_close)
+
+// -----------------------------
+// NO_TRADE heartbeat (with reasons — helps debug live behavior)
+// -----------------------------
+hasAnySignal = longSignal or shortSignal
+ntNoCross    = not (longRaw or shortRaw)
+ntLowVolume  = (longRaw or shortRaw) and not volumeOk
+ntRsiOut     = (ta.crossover(fastEma, slowEma) and close > trendEma and rsi < rsiLongMin) or (ta.crossunder(fastEma, slowEma) and close < trendEma and rsi > rsiShortMax)
+ntTrendMismatch = (ta.crossover(fastEma, slowEma) and close <= trendEma) or (ta.crossunder(fastEma, slowEma) and close >= trendEma)
+
+makeNoTradePayload() =>
+    a = '{"secret":"' + secret + '","source":"' + sourceName + '","signal":"NO_TRADE","signal_type":"scalp30"'
+    b = ',"strategy":"TF30_SCALP_EMA_RSI_ATR","symbol":"' + syminfo.ticker + '","exchange":"' + syminfo.prefix + '","interval":"' + timeframe.period + '","timeframe":"' + timeframe.period + '"'
+    c = ',"time":' + str.tostring(time) + ',"bar_time":' + str.tostring(time) + ',"price":' + fmt(close)
+    d = ',"reasons":{"no_cross":' + boolStr(ntNoCross) + ',"low_volume":' + boolStr(ntLowVolume) + ',"rsi_out":' + boolStr(ntRsiOut) + ',"htf_misalign":' + boolStr(ntTrendMismatch) + '}'
+    e = ',"rsi":' + fmt(rsi) + ',"atr":' + fmt(atr) + ',"atr_pct":' + fmt(atrPct)
+    f = ',"fast_ema":' + fmt(fastEma) + ',"slow_ema":' + fmt(slowEma) + ',"trend_ema":' + fmt(trendEma)
+    g = ',"volume":' + fmt(volume) + ',"volume_ma":' + fmt(volumeSma) + '}'
+    a + b + c + d + e + f + g
+
+if enableNoTradeAlert and barstate.isconfirmed and not hasAnySignal
+    alert(makeNoTradePayload(), alert.freq_once_per_bar_close)
+
+// -----------------------------
+// Test alert (debug only — keep OFF for live)
+// -----------------------------
+if testAlert and barstate.isconfirmed
+    testSl  = close - atr * atrStopMult
+    testTp1 = close + (close - testSl) * riskReward
+    testTp2 = close + (close - testSl) * tp2RR
+    testRisk = math.abs(close - testSl)
+    testReward = math.abs(testTp1 - close)
+    testRiskPct = testRisk / close * 100.0
+    alert(makePayload("BUY", close, longEntryLow, longEntryHigh, testSl, testTp1, testTp2, testRisk, testRiskPct, testReward), alert.freq_once_per_bar_close)
+
+// -----------------------------
+// Legacy alertcondition (kept for users who want named alerts)
+// -----------------------------
+alertcondition(longSignal,  title="TF30 BUY",  message="BUY signal. Use 'Any alert() function call' for JSON webhook payload.")
+alertcondition(shortSignal, title="TF30 SELL", message="SELL signal. Use 'Any alert() function call' for JSON webhook payload.")
