@@ -6,6 +6,7 @@ import {
   setIntervalMinutes,
   setCardRetentionDays,
   setActiveTradingPlans,
+  setTrendingAlertEnabled,
   setAiActiveWindows,
   setAiActiveDays,
   setAiModel,
@@ -504,6 +505,35 @@ export default function ScheduleControls({
             Save plans
           </button>
         </div>
+      </div>
+
+      {/* Trending Top 3 alert toggle */}
+      <div className="card flex flex-wrap items-center justify-between gap-3 p-5">
+        <div>
+          <div className="flex items-center gap-2">
+            <Icon name="bell" size={14} className="text-sig-warn" />
+            <h3 className="text-[13px] font-semibold uppercase tracking-eyebrow text-ink-secondary">
+              Top 3 Trending Telegram alerts
+            </h3>
+            <span
+              className={`pulse-dot ${config.trending_alert_enabled ? "" : "!bg-sig-warn"}`}
+            />
+            <span className="text-[11px] text-ink-muted">
+              {config.trending_alert_enabled ? "ON" : "OFF"}
+            </span>
+          </div>
+          <p className="mt-1 max-w-xl text-[11px] text-ink-muted">
+            ส่ง Telegram เมื่อมีเหรียญใหม่ติด Top 3 hottest (Binance 24h % gain). ปิดเพื่อ
+            ลด noise — snapshot ยัง update ต่อ ดังนั้นเปิดกลับมาก็ไม่ flood ย้อนหลัง.
+          </p>
+        </div>
+        <button
+          disabled={pending}
+          onClick={() => safeRun(() => setTrendingAlertEnabled(!config.trending_alert_enabled))}
+          className={`btn ${config.trending_alert_enabled ? "btn-secondary" : "btn-primary"} disabled:opacity-50`}
+        >
+          {config.trending_alert_enabled ? "Turn OFF" : "Turn ON"}
+        </button>
       </div>
 
       {/* AI active schedule (multi-window + day-of-week) */}

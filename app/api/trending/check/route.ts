@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getSupabaseAdmin } from "@/lib/supabase/server";
 import { getTrendingBuckets } from "@/lib/binance/topMovers";
 import { broadcastTelegramMessage } from "@/lib/telegram/sendTelegramMessage";
+import { getScheduleConfig } from "@/lib/schedule/settings";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -56,8 +57,18 @@ async function handle(req: NextRequest) {
 
     const newcomers = currentSymbols.filter((s) => !previousSymbols.includes(s));
 
+    // Admin can disable trending Telegram alerts via dashboard. We still
+    // update the snapshot below so re-enabling later doesn't flood with
+    // every newcomer that landed during the off window.
+    const cfg = await getScheduleConfig().catch(() => null);
+    const alertsEnabled = cfg?.trending_alert_enabled !== false;
+
     let telegramSent = false;
-    if (newcomers.length > 0) {
+    let telegramSkippedReason: string | null = null;
+    if (newcomers.length > 0 && !alertsEnabled) {
+      telegramSkippedReason = "trending_alerts_disabled";
+    }
+    if (newcomers.length > 0 && alertsEnabled) {
       const lines = [
         "🔥 <b>Top 3 Trending — Newcomer Alert</b>",
         "",
@@ -101,6 +112,8 @@ async function handle(req: NextRequest) {
       previous: previousSymbols,
       newcomers,
       telegram_sent: telegramSent,
+      telegram_skipped_reason: telegramSkippedReason,
+      alerts_enabled: alertsEnabled,
     });
   } catch (err) {
     return NextResponse.json(

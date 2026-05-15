@@ -147,6 +147,8 @@ async function buildSnapshot(): Promise<ConfigBroadcastInput> {
         .join(" + ");
     })(),
 
+    trendingAlertEnabled: cfg?.trending_alert_enabled !== false,
+
     minConfidence: process.env.MIN_CONFIDENCE ?? "70",
     blockedHours: process.env.BLOCKED_HOURS ?? "13,14,16,17,20",
     notradeTelegram: process.env.NOTRADE_TELEGRAM ?? "1",

@@ -93,6 +93,14 @@ export async function setAiActiveDays(days: number[]) {
   revalidatePath("/dashboard");
 }
 
+export async function setTrendingAlertEnabled(enabled: boolean) {
+  await requireAdminOrThrow();
+  await updateScheduleConfig({ trending_alert_enabled: enabled });
+  revalidatePath("/dashboard/schedule");
+  revalidatePath("/dashboard/trending");
+  return { ok: true, enabled };
+}
+
 export async function setActiveTradingPlans(plans: TradingPlan[]) {
   await requireAdminOrThrow();
   const valid = (TRADING_PLANS as readonly string[]).slice();

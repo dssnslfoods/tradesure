@@ -45,6 +45,14 @@ export interface BacktestScheduleConfig {
   ai_active_windows: AiWindow[];
   ai_active_days: number[];
 
+  // ── Trending Top 3 alerts ─────────────────────────────────────────────
+  // The /api/trending/check cron compares current Top 3 hottest coins (by
+  // 24h % change) to the last seen snapshot. When a new coin enters the
+  // Top 3, it broadcasts a "Newcomer Alert" to Telegram. Set false to
+  // suppress these alerts entirely. The snapshot is still updated — flip
+  // the toggle back on later to resume alerts without spamming history.
+  trending_alert_enabled: boolean;
+
   // ── Active trading plans (Phase 1a: multi-plan support) ───────────────
   // Which Pine indicators the webhook is allowed to act on. Signals whose
   // `signal_type` is not in this list are rejected (200 OK with reason, NOT
@@ -88,6 +96,7 @@ const DEFAULT_CONFIG: BacktestScheduleConfig = {
   ai_model_secondary: "gemini-2.5-flash", // sensible default if admin flips to compare/vote
   ai_active_windows: [],     // empty == always on
   ai_active_days: ALL_DAYS,  // all 7 days
+  trending_alert_enabled: true,  // legacy behavior — admin can opt out via UI
   // Default to swing-only — Pine v3 (intraday) was backtested and aborted
   // (see pine/v3_backtest_results.md). Admin can still toggle intraday ON
   // via the dashboard if a working v3 indicator ships in the future.
@@ -169,6 +178,11 @@ function normalizeConfig(cfg: BacktestScheduleConfig): BacktestScheduleConfig {
   const out = { ...cfg };
   if (!Array.isArray(out.ai_active_windows)) out.ai_active_windows = [];
   if (!Array.isArray(out.ai_active_days)) out.ai_active_days = ALL_DAYS;
+
+  // Normalize trending_alert_enabled: default true if field missing
+  if (typeof out.trending_alert_enabled !== "boolean") {
+    out.trending_alert_enabled = true;
+  }
 
   // Normalize active_trading_plans: legacy rows (pre-Phase-1a) have no field
   // — treat them as swing-only since that matches the post-abort default and

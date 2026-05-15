@@ -380,6 +380,17 @@ export default function ConfigDetailModal({ data }: { data: ConfigDetailData }) 
                 }
                 hint="สัญญาณจาก plan ที่ปิดอยู่จะถูก reject ที่ webhook ทันที"
               />
+              <Row
+                label="Top 3 Trending alerts"
+                value={
+                  config.trending_alert_enabled ? (
+                    <StatusPill state="good" label="ON" />
+                  ) : (
+                    <StatusPill state="warn" label="OFF" />
+                  )
+                }
+                hint="ส่ง Telegram เมื่อมีเหรียญใหม่ติด Top 3 hottest 24h"
+              />
             </Section>
 
             {/* ── 5. Filters / Env ── */}

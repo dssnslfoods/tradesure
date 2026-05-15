@@ -385,6 +385,9 @@ export interface ConfigBroadcastInput {
   // Trading plans (Phase 1b — which Pine indicators the webhook accepts)
   activeTradingPlansSummary: string;   // e.g., "Swing + Intraday" or "Swing only"
 
+  // Trending Top 3 newcomer alerts
+  trendingAlertEnabled: boolean;
+
   // Filters / env
   minConfidence: string;
   blockedHours: string;
@@ -452,6 +455,9 @@ export function buildConfigBroadcastMessage(c: ConfigBroadcastInput): string {
     "",
     "📡 <b>Active Trading Plans</b>",
     `   <code>${escapeHtml(c.activeTradingPlansSummary)}</code>`,
+    "",
+    "🔥 <b>Top 3 Trending alerts</b>",
+    `   ${c.trendingAlertEnabled ? "🟢 ON" : "🟡 OFF"}`,
     "",
     "⚙️ <b>Quality Filters</b>",
     `   Min confidence: <b>${escapeHtml(c.minConfidence)}%</b>`,
