@@ -79,21 +79,27 @@ supabase/migrations/        ← SQL migrations (apply via Supabase MCP / dashboa
 |---|---|---|---|
 | `pine/btc_futures_signal_v2.pine` | `indicator()` v2.1.1 | **Live** — Swing 1H webhook signals | `swing` |
 | `pine/btc_futures_signal_v4.pine` | `indicator()` v4 | **Live** — Intraday 15m webhook signals (regime-gated) | `intraday` |
+| `pine/btc_tf30_scalp_signal.pine` | `indicator()` admin-custom | **Live** — TF30 Scalp 30m (admin-defined plan) | `scalp30` |
 | `pine/btc_futures_strategy_v1.pine` | `strategy()` v1.3 | Backtest only — swing companion | swing |
 | `pine/btc_futures_strategy_v4.pine` | `strategy()` v4 | Backtest only — intraday companion | intraday |
+| `pine/btc_tf30_scalp_strategy.pine` | `strategy()` admin-custom | Backtest only — scalp30 companion | scalp30 |
 | `pine/btc_futures_strategy_v3.pine` | `strategy()` v3 | Backtest only — ABORTED (EMA cross) | — |
 | `pine/btc_futures_strategy_v3_5.pine` | `strategy()` v3.5 | Backtest only — ABORTED (VWAP reclaim) | — |
 | `pine/v3_design.md` + `v3_backtest_results.md` | docs | v3 post-mortem | — |
 | `pine/v3_5_design.md` + `v3_5_backtest_results.md` | docs | v3.5 post-mortem | — |
 | `pine/v4_backtest_results.md` | docs | v4 backtest + promotion rationale | — |
+| `pine/tf30_scalp_backtest_results.md` | docs | TF30 scalp backtest + promotion rationale | — |
 
 **v2.1.1 + v1.3 share the same trading logic** (EMA crosses, ADX, ATR-based SL/TP). **v4 indicator + v4 strategy share regime-gated asymmetric logic** (LONG via EMA cross in Daily UP regime; SHORT via VWAP reclaim in Daily DOWN regime). Strategy files mirror indicators so backtest approximates live.
 
 Live indicators are **symbol-agnostic**: use `syminfo.ticker` + `request.security(syminfo.tickerid, "D", …)`. One Pine code per plan, N TradingView alerts (one per symbol+TF). All alerts point to `/api/webhook/tradingview`.
 
-**Plan status (2026-05-14)**:
+**Plan status (2026-05-15)**:
 - 🟢 **Swing (v2.1.1)** — LIVE, proven. PF 1.31 with Daily filter on 16mo BTC 1H backtest.
-- 🟢 **Intraday (v4)** — LIVE after 11 backtest iterations. PF 2.75 in Test K (Jan-May 2026 BTC 15m, 12 trades, WR 58%, DD 0.21%). **LONG side untested** — period was 100% bear regime. First 30 days of live data treated as Phase 3 validation (see `pine/v4_backtest_results.md` §5). Admin can disable the plan in one click via dashboard if metrics deviate.
+- 🟢 **Intraday (v4)** — LIVE after 11 backtest iterations. PF 2.75 in Test K (Jan-May 2026 BTC 15m, 12 trades, WR 58%, DD 0.21%). **LONG side untested** — period was 100% bear regime. See `pine/v4_backtest_results.md`.
+- 🟢 **Scalp30 (admin-custom)** — LIVE. First plan added via the master-data catalog (catalog key `scalp30`). PF 1.126 over 16mo BTC 30m, 349 trades, WR 47.58%, DD 2.38%. **LONG PF 0.825** below symmetric-balance bar — passed overall but flagged for 30-day monitoring (see `pine/tf30_scalp_backtest_results.md` §5).
+
+**Multi-plan master data**: trading plans are now stored in `app_settings.trading_plans_catalog` (JSON). Admin can add new plans via `/dashboard/schedule` → Manage plans catalog. Plan keys must match `^[a-z0-9_]{2,32}$`. The two default plans (swing, intraday) are protected from deletion; custom plans can be added/removed freely. Webhook validates `signal_type` against catalog at request time — unknown keys are rejected with `unknown_plan` and a hint pointing to the admin UI.
 
 ---
 
