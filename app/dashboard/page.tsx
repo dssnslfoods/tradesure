@@ -129,11 +129,14 @@ export default async function DashboardPage() {
   let retentionDays = 7;
   let aiWindows: AiWindow[] = [];
   let aiDays: number[] = [0, 1, 2, 3, 4, 5, 6];
+  let plansCatalog: Awaited<ReturnType<typeof import("@/lib/schedule/settings").getTradingPlansCatalog>> = [];
   try {
     const cfg = await getScheduleConfig();
     retentionDays = cfg.card_retention_days ?? 7;
     aiWindows = cfg.ai_active_windows;
     aiDays = cfg.ai_active_days;
+    const { getTradingPlansCatalog } = await import("@/lib/schedule/settings");
+    plansCatalog = await getTradingPlansCatalog();
   } catch {
     // Settings unavailable — fall through with defaults
   }
@@ -279,6 +282,7 @@ export default async function DashboardPage() {
 
       <SignalsTable
         isAdmin={isAdmin}
+        plansCatalog={plansCatalog}
         rows={rows.map<SignalRow>((r) => ({
           id: r.id,
           signal_id: r.signal_id,
@@ -299,10 +303,7 @@ export default async function DashboardPage() {
           take_profit_2_num: r.take_profit_2_num,
           tv_signal: r.tradingview_signals?.signal ?? null,
           tv_price: r.tradingview_signals?.price ?? null,
-          signal_type: (r.tradingview_signals?.signal_type ?? null) as
-            | "swing"
-            | "intraday"
-            | null,
+          signal_type: r.tradingview_signals?.signal_type ?? null,
         }))}
       />
 

@@ -1,6 +1,23 @@
-export type TradingPlan = "swing" | "intraday";
+// TradingPlan keys are now dynamic (master data in app_settings) — admin
+// can add new plans (e.g. "scalp30" for 30m TF) without code changes.
+// Pre-Phase-2 the type was a string literal union of "swing"|"intraday";
+// it's relaxed to string so any catalog-defined key flows end-to-end.
+export type TradingPlan = string;
 
-export const TRADING_PLANS: readonly TradingPlan[] = ["swing", "intraday"];
+// Default catalog keys — used as legacy fallback. The actual catalog lives
+// in app_settings.value under key "trading_plans_catalog" and is mutable.
+export const DEFAULT_TRADING_PLAN_KEYS: readonly string[] = ["swing", "intraday"];
+
+// A plan definition — stored in the catalog and used to render chips,
+// badges, and Telegram tags. Color names map to tailwind tokens
+// (sig-info, sig-violet, sig-warn, sig-buy, sig-sell, brand).
+export interface TradingPlanDef {
+  key: string;            // machine name, used in payload signal_type. URL-safe.
+  label: string;          // display name, e.g., "Scalp · 30m"
+  emoji: string;          // single emoji, e.g., "🟢"
+  color: "info" | "violet" | "warn" | "buy" | "sell" | "brand"; // chip color
+  description?: string;   // optional admin note
+}
 
 export interface TradingViewPayload {
   secret?: string;

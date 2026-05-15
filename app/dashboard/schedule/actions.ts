@@ -5,10 +5,13 @@ import { cookies } from "next/headers";
 import {
   updateScheduleConfig,
   setApiKey as persistApiKey,
+  addTradingPlan as catalogAdd,
+  updateTradingPlan as catalogUpdate,
+  removeTradingPlan as catalogRemove,
   type AiKeyProvider,
 } from "@/lib/schedule/settings";
 import { isCurrentUserAdmin } from "@/lib/auth/guards";
-import { TRADING_PLANS, type TradingPlan } from "@/types/signal";
+import type { TradingPlan, TradingPlanDef } from "@/types/signal";
 
 async function requireAdminOrThrow() {
   if (!(await isCurrentUserAdmin())) {
@@ -103,16 +106,44 @@ export async function setTrendingAlertEnabled(enabled: boolean) {
 
 export async function setActiveTradingPlans(plans: TradingPlan[]) {
   await requireAdminOrThrow();
-  const valid = (TRADING_PLANS as readonly string[]).slice();
-  const clean = Array.from(new Set(plans)).filter((p): p is TradingPlan =>
-    valid.includes(p)
-  );
-  // Allow empty array — kill switch — but warn loudly via the action result.
-  // The webhook treats empty as "reject everything", which is intentional.
+  // Catalog validation happens in the UI (admin only picks from existing
+  // chips). Here we just dedupe + drop empty strings; allow empty array
+  // as the intentional kill switch.
+  const clean = Array.from(new Set(plans))
+    .filter((p): p is TradingPlan => typeof p === "string" && p.length > 0);
   await updateScheduleConfig({ active_trading_plans: clean });
   revalidatePath("/dashboard/schedule");
   revalidatePath("/dashboard");
   return { ok: true, plans: clean };
+}
+
+// ─── Trading plans catalog CRUD (admin master data) ──────────────────────
+
+export async function addTradingPlan(def: TradingPlanDef) {
+  await requireAdminOrThrow();
+  const next = await catalogAdd(def);
+  revalidatePath("/dashboard/schedule");
+  revalidatePath("/dashboard");
+  return { ok: true, catalog: next };
+}
+
+export async function updateTradingPlan(
+  key: string,
+  patch: Partial<Omit<TradingPlanDef, "key">>
+) {
+  await requireAdminOrThrow();
+  const next = await catalogUpdate(key, patch);
+  revalidatePath("/dashboard/schedule");
+  revalidatePath("/dashboard");
+  return { ok: true, catalog: next };
+}
+
+export async function removeTradingPlan(key: string) {
+  await requireAdminOrThrow();
+  const next = await catalogRemove(key);
+  revalidatePath("/dashboard/schedule");
+  revalidatePath("/dashboard");
+  return { ok: true, catalog: next };
 }
 
 export async function setAiApiKey(provider: AiKeyProvider, key: string | null) {

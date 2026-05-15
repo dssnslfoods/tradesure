@@ -4,8 +4,7 @@ import {
   broadcastTelegramMessage,
   buildNoTradeMessage,
 } from "@/lib/telegram/sendTelegramMessage";
-import { isTradingPlanActive } from "@/lib/schedule/settings";
-import { TRADING_PLANS } from "@/types/signal";
+import { isTradingPlanActive, getTradingPlansCatalog } from "@/lib/schedule/settings";
 import type { TradingPlan, TradingViewPayload } from "@/types/signal";
 
 export const runtime = "nodejs";
@@ -51,15 +50,24 @@ export async function POST(req: NextRequest) {
   }
 
   // ─── Trading-plan filter ─────────────────────────────────────────────────
-  // Each indicator tags its payload with signal_type ("swing" | "intraday").
-  // Missing/unknown values default to "swing" for backwards compat with the
-  // pre-Phase-1a Pine v2.1. If the plan is disabled by admin, we reject the
-  // signal entirely — return 200 (TradingView treats non-2xx as a delivery
-  // failure and retries), but don't save, don't analyze, don't notify.
-  const rawType = typeof payload.signal_type === "string" ? payload.signal_type : undefined;
-  const planType: TradingPlan = (TRADING_PLANS as readonly string[]).includes(rawType ?? "")
-    ? (rawType as TradingPlan)
-    : "swing";
+  // Each indicator tags its payload with signal_type — admin-defined string
+  // matching a TradingPlanDef.key in the catalog. Validate against catalog
+  // (unknown_plan reject for typo safety), then against active list
+  // (plan_inactive reject for admin opt-out). Missing signal_type → "swing"
+  // for backwards compat with pre-Phase-1a Pine v2.1 alerts.
+  const rawType = typeof payload.signal_type === "string" ? payload.signal_type.trim() : "";
+  const catalog = await getTradingPlansCatalog().catch(() => []);
+  const knownKeys = catalog.map((p) => p.key);
+  const planType: TradingPlan = rawType.length > 0 ? rawType : "swing";
+
+  if (rawType.length > 0 && knownKeys.length > 0 && !knownKeys.includes(rawType)) {
+    return NextResponse.json({
+      ok: true,
+      rejected: "unknown_plan",
+      plan: rawType,
+      hint: "signal_type is not in trading_plans_catalog — admin add it via /dashboard/schedule",
+    });
+  }
   if (!(await isTradingPlanActive(planType))) {
     return NextResponse.json({
       ok: true,

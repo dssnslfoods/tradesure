@@ -81,12 +81,14 @@ export default function TradeCard({
   onEdit,
   isNew,
   sparkline,
+  planMeta,
 }: {
   row: SignalRow;
   isAdmin: boolean;
   onEdit: () => void;
   isNew?: boolean;
   sparkline?: number[];
+  planMeta?: { emoji: string; label: string };
 }) {
   const router = useRouter();
   const [pending, start] = useTransition();
@@ -174,21 +176,31 @@ export default function TradeCard({
               <span className="chip chip-mute !py-0.5 !px-1.5 !text-[10px]">
                 {row.interval}
               </span>
-              {(row.signal_type ?? "swing") === "intraday" ? (
-                <span
-                  className="chip !py-0.5 !px-1.5 !text-[10px] !border-sig-violet/40 !bg-sig-violet/15 !text-sig-violet"
-                  title="Intraday plan (Pine v3, 15m)"
-                >
-                  🟣 Intraday
-                </span>
-              ) : (
-                <span
-                  className="chip !py-0.5 !px-1.5 !text-[10px] !border-sig-info/40 !bg-sig-info/15 !text-sig-info"
-                  title="Swing plan (Pine v2.1, 1H)"
-                >
-                  🔵 Swing
-                </span>
-              )}
+              {(() => {
+                const key = row.signal_type ?? "swing";
+                // Default planMeta lookups for known keys when prop missing
+                const meta =
+                  planMeta ??
+                  (key === "intraday"
+                    ? { emoji: "🟣", label: "Intraday · 15m" }
+                    : key === "swing"
+                    ? { emoji: "🔵", label: "Swing · 1H" }
+                    : { emoji: "⚪", label: key });
+                const colorClass =
+                  key === "intraday"
+                    ? "!border-sig-violet/40 !bg-sig-violet/15 !text-sig-violet"
+                    : key === "swing"
+                    ? "!border-sig-info/40 !bg-sig-info/15 !text-sig-info"
+                    : "!border-white/20 !bg-white/10 !text-ink-secondary";
+                return (
+                  <span
+                    className={`chip !py-0.5 !px-1.5 !text-[10px] ${colorClass}`}
+                    title={`Trading plan: ${meta.label} (signal_type:"${key}")`}
+                  >
+                    {meta.emoji} {meta.label.split(" · ")[0]}
+                  </span>
+                );
+              })()}
             </div>
             <div className="mt-1 font-mono text-[10px] text-ink-muted">
               {fmtTime(row.created_at)}

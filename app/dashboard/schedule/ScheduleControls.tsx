@@ -14,8 +14,22 @@ import {
   setAiApiKey,
   processQueuedSignals,
   triggerRunNow,
+  addTradingPlan,
+  removeTradingPlan,
 } from "./actions";
-import type { TradingPlan } from "@/types/signal";
+import type { TradingPlan, TradingPlanDef } from "@/types/signal";
+import { DEFAULT_TRADING_PLAN_KEYS } from "@/types/signal";
+
+// Map catalog color name → tailwind chip classes (active state).
+// The inactive variant always uses the muted surface-2 chip.
+const PLAN_COLOR_CLASSES: Record<TradingPlanDef["color"], string> = {
+  info:   "border-sig-info/40 bg-sig-info/15 text-sig-info",
+  violet: "border-sig-violet/40 bg-sig-violet/15 text-sig-violet",
+  warn:   "border-sig-warn/40 bg-sig-warn/15 text-sig-warn",
+  buy:    "border-sig-buy/40 bg-sig-buy/15 text-sig-buy",
+  sell:   "border-sig-sell/40 bg-sig-sell/15 text-sig-sell",
+  brand:  "border-brand/40 bg-brand/15 text-brand",
+};
 import {
   isWithinAiSchedule,
   type AiWindow,
@@ -45,10 +59,12 @@ export default function ScheduleControls({
   config,
   queuedCount,
   apiKeys,
+  plansCatalog,
 }: {
   config: BacktestScheduleConfig;
   queuedCount: number;
   apiKeys: MaskedApiKeys;
+  plansCatalog: TradingPlanDef[];
 }) {
   const [pending, start] = useTransition();
   const [interval, setIntervalState] = useState(config.interval_minutes);
@@ -466,7 +482,10 @@ export default function ScheduleControls({
                 {config.active_trading_plans.length === 0
                   ? "ปิดทั้งหมด (kill switch)"
                   : config.active_trading_plans
-                      .map((p) => (p === "swing" ? "Swing (1H)" : "Intraday (15m)"))
+                      .map((k) => {
+                        const def = plansCatalog.find((p) => p.key === k);
+                        return def ? def.label : k;
+                      })
                       .join(" + ")}
               </span>
             </p>
@@ -474,29 +493,30 @@ export default function ScheduleControls({
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
-          <button
-            type="button"
-            onClick={() => togglePlan("swing")}
-            className={`h-9 rounded-chip border px-3 text-[12px] font-semibold transition ${
-              plans.includes("swing")
-                ? "border-sig-info/40 bg-sig-info/15 text-sig-info"
-                : "border-white/5 bg-surface-2/60 text-ink-muted hover:text-ink-primary"
-            }`}
-          >
-            🔵 Swing · 1H (v2.1.1)
-          </button>
-          <button
-            type="button"
-            onClick={() => togglePlan("intraday")}
-            className={`h-9 rounded-chip border px-3 text-[12px] font-semibold transition ${
-              plans.includes("intraday")
-                ? "border-sig-violet/40 bg-sig-violet/15 text-sig-violet"
-                : "border-white/5 bg-surface-2/60 text-ink-muted hover:text-ink-primary"
-            }`}
-            title="Pine v4 (15m intraday, regime-gated). Backtest PF 2.75. ต้องสร้าง alert บน chart 15m ด้วย indicator btc_futures_signal_v4.pine"
-          >
-            🟣 Intraday · 15m (v4)
-          </button>
+          {plansCatalog.length === 0 ? (
+            <span className="text-[11px] text-ink-muted">
+              ยังไม่มี plan ใน catalog — เพิ่มที่ส่วนด้านล่าง
+            </span>
+          ) : (
+            plansCatalog.map((def) => {
+              const active = plans.includes(def.key);
+              return (
+                <button
+                  key={def.key}
+                  type="button"
+                  onClick={() => togglePlan(def.key)}
+                  className={`h-9 rounded-chip border px-3 text-[12px] font-semibold transition ${
+                    active
+                      ? PLAN_COLOR_CLASSES[def.color]
+                      : "border-white/5 bg-surface-2/60 text-ink-muted hover:text-ink-primary"
+                  }`}
+                  title={def.description ?? `signal_type:"${def.key}"`}
+                >
+                  {def.emoji} {def.label}
+                </button>
+              );
+            })
+          )}
           <button
             disabled={pending || !plansChanged}
             onClick={() => safeRun(() => setActiveTradingPlans(plans))}
@@ -505,6 +525,13 @@ export default function ScheduleControls({
             Save plans
           </button>
         </div>
+
+        {/* Catalog manager — admin can add/remove plans without code changes */}
+        <PlansCatalogManager
+          plansCatalog={plansCatalog}
+          pending={pending}
+          safeRun={safeRun}
+        />
       </div>
 
       {/* Trending Top 3 alert toggle */}
@@ -856,6 +883,193 @@ function ApiKeyRow({
           ? `${providerLabel} key มาจาก env var — แทนที่ได้โดยใส่ key ใหม่`
           : `ยังไม่ได้ตั้ง ${providerLabel} key — ใส่ที่นี่หรือตั้ง env var`}
       </p>
+    </div>
+  );
+}
+
+// ─── Plans Catalog Manager ─────────────────────────────────────────────
+// Admin add / delete plans without code changes. Default plans (swing,
+// intraday) are protected from deletion — they back the live indicators
+// we ship. Custom plans (e.g., scalp30) admin can add and remove freely.
+function PlansCatalogManager({
+  plansCatalog,
+  pending,
+  safeRun,
+}: {
+  plansCatalog: TradingPlanDef[];
+  pending: boolean;
+  safeRun: (fn: () => Promise<unknown>) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [newKey, setNewKey] = useState("");
+  const [newLabel, setNewLabel] = useState("");
+  const [newEmoji, setNewEmoji] = useState("🟢");
+  const [newColor, setNewColor] = useState<TradingPlanDef["color"]>("brand");
+  const [newDescription, setNewDescription] = useState("");
+  const colorOptions: TradingPlanDef["color"][] = ["info", "violet", "warn", "buy", "sell", "brand"];
+
+  const resetForm = () => {
+    setNewKey("");
+    setNewLabel("");
+    setNewEmoji("🟢");
+    setNewColor("brand");
+    setNewDescription("");
+  };
+
+  const submit = () => {
+    const def: TradingPlanDef = {
+      key: newKey.trim(),
+      label: newLabel.trim(),
+      emoji: newEmoji.trim(),
+      color: newColor,
+      description: newDescription.trim() || undefined,
+    };
+    safeRun(async () => {
+      const res = await addTradingPlan(def);
+      resetForm();
+      return res;
+    });
+  };
+
+  return (
+    <div className="rounded-chip border border-white/5 bg-surface-2/30 p-3">
+      <div className="flex items-center justify-between">
+        <div>
+          <span className="text-[11px] font-semibold uppercase tracking-eyebrow text-ink-muted">
+            Manage plans catalog
+          </span>
+          <p className="mt-0.5 text-[10px] text-ink-faint">
+            เพิ่ม plan ใหม่ของตัวเอง (เช่น TF30 scalp) — ใช้ใน Pine
+            payload <code>{"\"signal_type\":\"<key>\""}</code>
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={() => setOpen((v) => !v)}
+          className="chip !text-[11px]"
+        >
+          {open ? "Hide" : "Show"}
+        </button>
+      </div>
+
+      {open && (
+        <div className="mt-3 space-y-3">
+          {/* Existing plans */}
+          <div className="space-y-1.5">
+            {plansCatalog.map((def) => {
+              const isDefault = (DEFAULT_TRADING_PLAN_KEYS as readonly string[]).includes(def.key);
+              return (
+                <div
+                  key={def.key}
+                  className="flex items-center justify-between gap-2 rounded border border-white/5 bg-surface-1/50 px-3 py-2 text-[12px]"
+                >
+                  <div className="flex min-w-0 items-center gap-2">
+                    <span className="text-base">{def.emoji}</span>
+                    <span className="font-semibold text-ink-primary">{def.label}</span>
+                    <code className="rounded bg-black/30 px-1.5 py-0.5 text-[10px] text-ink-muted">
+                      {def.key}
+                    </code>
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-[10px] text-ink-faint">
+                      color: <code>{def.color}</code>
+                    </span>
+                    {isDefault ? (
+                      <span className="chip chip-mute !text-[10px]" title="ลบไม่ได้ — เป็น plan default ของระบบ">
+                        protected
+                      </span>
+                    ) : (
+                      <button
+                        type="button"
+                        disabled={pending}
+                        onClick={() => {
+                          if (confirm(`ลบ plan "${def.label}" (key: ${def.key})?`)) {
+                            safeRun(() => removeTradingPlan(def.key));
+                          }
+                        }}
+                        className="chip !text-[10px] hover:!text-sig-sell"
+                      >
+                        Delete
+                      </button>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+
+          {/* Add new plan form */}
+          <div className="rounded border border-white/5 bg-surface-1/50 p-3">
+            <div className="mb-2 text-[11px] font-semibold uppercase tracking-eyebrow text-ink-muted">
+              + Add new plan
+            </div>
+            <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+              <label className="flex flex-col gap-1 text-[11px] text-ink-muted">
+                Key (a-z, 0-9, _ ; 2-32 chars)
+                <input
+                  value={newKey}
+                  onChange={(e) => setNewKey(e.target.value.toLowerCase())}
+                  placeholder="scalp30"
+                  className="rounded border border-white/10 bg-surface-2 px-2 py-1.5 text-[12px] text-ink-primary"
+                />
+              </label>
+              <label className="flex flex-col gap-1 text-[11px] text-ink-muted">
+                Label (max 60)
+                <input
+                  value={newLabel}
+                  onChange={(e) => setNewLabel(e.target.value)}
+                  placeholder="Scalp · 30m"
+                  className="rounded border border-white/10 bg-surface-2 px-2 py-1.5 text-[12px] text-ink-primary"
+                />
+              </label>
+              <label className="flex flex-col gap-1 text-[11px] text-ink-muted">
+                Emoji
+                <input
+                  value={newEmoji}
+                  onChange={(e) => setNewEmoji(e.target.value)}
+                  placeholder="🟢"
+                  className="rounded border border-white/10 bg-surface-2 px-2 py-1.5 text-[12px] text-ink-primary"
+                />
+              </label>
+              <label className="flex flex-col gap-1 text-[11px] text-ink-muted">
+                Color
+                <select
+                  value={newColor}
+                  onChange={(e) => setNewColor(e.target.value as TradingPlanDef["color"])}
+                  className="rounded border border-white/10 bg-surface-2 px-2 py-1.5 text-[12px] text-ink-primary"
+                >
+                  {colorOptions.map((c) => (
+                    <option key={c} value={c}>{c}</option>
+                  ))}
+                </select>
+              </label>
+              <label className="flex flex-col gap-1 text-[11px] text-ink-muted sm:col-span-2">
+                Description (optional, max 200)
+                <input
+                  value={newDescription}
+                  onChange={(e) => setNewDescription(e.target.value)}
+                  placeholder="30m EMA21/55 scalp — Pine custom"
+                  className="rounded border border-white/10 bg-surface-2 px-2 py-1.5 text-[12px] text-ink-primary"
+                />
+              </label>
+            </div>
+            <div className="mt-3 flex items-center justify-between gap-2">
+              <span className="text-[10px] text-ink-faint">
+                preview: <span className="ml-1 text-ink-primary">{newEmoji} {newLabel || "label"}</span>
+                <code className="ml-2 rounded bg-black/30 px-1.5 py-0.5">{newKey || "key"}</code>
+              </span>
+              <button
+                type="button"
+                disabled={pending || !newKey.trim() || !newLabel.trim() || !newEmoji.trim()}
+                onClick={submit}
+                className="btn btn-primary disabled:opacity-50"
+              >
+                Add plan
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

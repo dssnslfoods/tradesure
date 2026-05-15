@@ -1,6 +1,6 @@
 import { getSupabaseAdmin } from "@/lib/supabase/server";
-import type { TradingPlan } from "@/types/signal";
-import { TRADING_PLANS } from "@/types/signal";
+import type { TradingPlan, TradingPlanDef } from "@/types/signal";
+import { DEFAULT_TRADING_PLAN_KEYS } from "@/types/signal";
 
 /**
  * A single AI active-hours window. Both bounds are integer hours 0..23 in
@@ -185,15 +185,14 @@ function normalizeConfig(cfg: BacktestScheduleConfig): BacktestScheduleConfig {
   }
 
   // Normalize active_trading_plans: legacy rows (pre-Phase-1a) have no field
-  // — treat them as swing-only since that matches the post-abort default and
-  // there's no live v3 indicator producing intraday signals anyway. Filter to
-  // known values so a stale enum value can't poison the gate.
+  // — treat them as swing-only since that matches the post-abort default.
+  // Filter to plain strings; catalog validation happens at use-site
+  // (webhook), not here, so admin-added custom keys flow through.
   if (!Array.isArray(out.active_trading_plans)) {
     out.active_trading_plans = ["swing"];
   } else {
-    out.active_trading_plans = out.active_trading_plans.filter((p): p is TradingPlan =>
-      (TRADING_PLANS as readonly string[]).includes(p)
-    );
+    out.active_trading_plans = out.active_trading_plans
+      .filter((p): p is TradingPlan => typeof p === "string" && p.length > 0);
   }
 
   // If the new array is empty but the old single fields define a window, migrate.
@@ -421,6 +420,143 @@ export async function setApiKey(
       { onConflict: "key" }
     );
   if (error) throw new Error(`setApiKey: ${error.message}`);
+}
+
+// ─── Trading Plans Master Data (catalog) ───────────────────────────────
+//
+// Stored in app_settings under key="trading_plans_catalog" as a JSON array
+// of TradingPlanDef. Lets admin add new plans (e.g., a 30m scalp) without
+// touching code — they just write their own Pine indicator that tags
+// "signal_type":"<their_key>" and the webhook routes it automatically.
+//
+// The default catalog (seeded on first read) covers the two plans we
+// already ship live indicators for.
+
+const CATALOG_KEY = "trading_plans_catalog";
+
+const DEFAULT_CATALOG: TradingPlanDef[] = [
+  {
+    key: "swing",
+    label: "Swing · 1H",
+    emoji: "🔵",
+    color: "info",
+    description: "v2.1.1 indicator. EMA cross + Daily EMA200 regime filter.",
+  },
+  {
+    key: "intraday",
+    label: "Intraday · 15m",
+    emoji: "🟣",
+    color: "violet",
+    description: "v4 indicator. Regime-gated asymmetric (EMA cross LONG / VWAP reclaim SHORT).",
+  },
+];
+
+const VALID_COLORS: TradingPlanDef["color"][] = ["info", "violet", "warn", "buy", "sell", "brand"];
+
+/**
+ * Validate a TradingPlanDef before persisting. Throws on invalid input.
+ * Used by add/update server actions.
+ */
+function validatePlanDef(def: TradingPlanDef): void {
+  if (!def.key || typeof def.key !== "string") throw new Error("plan key required");
+  if (!/^[a-z0-9_]{2,32}$/.test(def.key)) {
+    throw new Error(
+      "plan key must be 2-32 chars of lowercase letters/digits/underscores (matches Pine payload signal_type)"
+    );
+  }
+  if (!def.label || def.label.length > 60) throw new Error("plan label required, max 60 chars");
+  if (!def.emoji || def.emoji.length > 8) throw new Error("plan emoji required, max 8 chars");
+  if (!VALID_COLORS.includes(def.color)) {
+    throw new Error(`plan color must be one of: ${VALID_COLORS.join(", ")}`);
+  }
+  if (def.description && def.description.length > 200) {
+    throw new Error("plan description max 200 chars");
+  }
+}
+
+export async function getTradingPlansCatalog(): Promise<TradingPlanDef[]> {
+  const supabase = getSupabaseAdmin();
+  const { data } = await supabase
+    .from("app_settings")
+    .select("value")
+    .eq("key", CATALOG_KEY)
+    .maybeSingle();
+  if (!data) {
+    // Seed default on first read so admin sees the existing plans
+    await supabase
+      .from("app_settings")
+      .insert({ key: CATALOG_KEY, value: DEFAULT_CATALOG });
+    return DEFAULT_CATALOG;
+  }
+  const raw = data.value;
+  if (!Array.isArray(raw)) return DEFAULT_CATALOG;
+  // Defensive filter — drop malformed entries instead of breaking the page
+  return raw.filter((p): p is TradingPlanDef => {
+    return (
+      p &&
+      typeof p === "object" &&
+      typeof p.key === "string" &&
+      typeof p.label === "string" &&
+      typeof p.emoji === "string" &&
+      typeof p.color === "string"
+    );
+  });
+}
+
+export async function addTradingPlan(def: TradingPlanDef): Promise<TradingPlanDef[]> {
+  validatePlanDef(def);
+  const current = await getTradingPlansCatalog();
+  if (current.some((p) => p.key === def.key)) {
+    throw new Error(`plan key "${def.key}" already exists`);
+  }
+  const next = [...current, def];
+  await persistCatalog(next);
+  return next;
+}
+
+export async function updateTradingPlan(
+  key: string,
+  patch: Partial<Omit<TradingPlanDef, "key">>
+): Promise<TradingPlanDef[]> {
+  const current = await getTradingPlansCatalog();
+  const idx = current.findIndex((p) => p.key === key);
+  if (idx < 0) throw new Error(`plan key "${key}" not found`);
+  const updated: TradingPlanDef = { ...current[idx], ...patch, key };
+  validatePlanDef(updated);
+  const next = [...current];
+  next[idx] = updated;
+  await persistCatalog(next);
+  return next;
+}
+
+export async function removeTradingPlan(key: string): Promise<TradingPlanDef[]> {
+  if (DEFAULT_TRADING_PLAN_KEYS.includes(key)) {
+    throw new Error(`cannot delete default plan "${key}" — toggle it inactive instead`);
+  }
+  const current = await getTradingPlansCatalog();
+  const next = current.filter((p) => p.key !== key);
+  if (next.length === current.length) throw new Error(`plan key "${key}" not found`);
+  // Also remove from active_trading_plans if present, so we don't gate on a
+  // plan that no longer exists.
+  const cfg = await getScheduleConfig();
+  if (cfg.active_trading_plans.includes(key)) {
+    await updateScheduleConfig({
+      active_trading_plans: cfg.active_trading_plans.filter((p) => p !== key),
+    });
+  }
+  await persistCatalog(next);
+  return next;
+}
+
+async function persistCatalog(next: TradingPlanDef[]): Promise<void> {
+  const supabase = getSupabaseAdmin();
+  const { error } = await supabase
+    .from("app_settings")
+    .upsert(
+      { key: CATALOG_KEY, value: next, updated_at: new Date().toISOString() },
+      { onConflict: "key" }
+    );
+  if (error) throw new Error(`persistCatalog: ${error.message}`);
 }
 
 export async function listRecentRuns(limit = 20): Promise<BacktestRunRow[]> {

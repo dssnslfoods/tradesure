@@ -89,7 +89,7 @@ export default async function SchedulePage() {
     );
   }
 
-  const [config, runs, queuedCount, apiKeys, telegramContactCount, totalSignals] =
+  const [config, runs, queuedCount, apiKeys, telegramContactCount, totalSignals, plansCatalog] =
     await Promise.all([
       getScheduleConfig(),
       listRecentRuns(10),
@@ -97,6 +97,7 @@ export default async function SchedulePage() {
       getMaskedApiKeys(),
       countTelegramContacts(),
       countTotalSignals(),
+      (await import("@/lib/schedule/settings")).getTradingPlansCatalog(),
     ]);
 
   // Build the structured payload that powers the View-configuration modal.
@@ -180,7 +181,7 @@ export default async function SchedulePage() {
         />
       </section>
 
-      <ScheduleControls config={config} queuedCount={queuedCount} apiKeys={apiKeys} />
+      <ScheduleControls config={config} queuedCount={queuedCount} apiKeys={apiKeys} plansCatalog={plansCatalog} />
 
       <section className="mt-7">
         <div className="mb-3 flex items-center gap-2">

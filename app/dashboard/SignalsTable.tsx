@@ -29,15 +29,10 @@ export interface SignalRow {
   take_profit_2_num: number | null;
   tv_signal: string | null;
   tv_price: number | null;
-  signal_type: "swing" | "intraday" | null;
+  signal_type: string | null;
 }
 
-type PlanFilter = "all" | "swing" | "intraday";
-
-const PLAN_LABEL: Record<Exclude<PlanFilter, "all">, { label: string; emoji: string }> = {
-  swing: { label: "Swing · 1H", emoji: "🔵" },
-  intraday: { label: "Intraday · 15m", emoji: "🟣" },
-};
+import type { TradingPlanDef } from "@/types/signal";
 
 type FilterKey = "all" | "open" | "wins" | "losses" | "skip" | "queued";
 
@@ -59,16 +54,29 @@ const FILTERS: { key: FilterKey; label: string; match: (r: SignalRow) => boolean
 export default function SignalsTable({
   rows,
   isAdmin = false,
+  plansCatalog = [],
 }: {
   rows: SignalRow[];
   isAdmin?: boolean;
+  plansCatalog?: TradingPlanDef[];
 }) {
   const router = useRouter();
   const [pending, start] = useTransition();
   const [editing, setEditing] = useState<SignalRow | null>(null);
   const [filter, setFilter] = useState<FilterKey>("all");
   const [symbolFilter, setSymbolFilter] = useState<string>("all");
-  const [planFilter, setPlanFilter] = useState<PlanFilter>("all");
+  const [planFilter, setPlanFilter] = useState<string>("all");
+
+  // Helper: resolve a row's plan to its display metadata. Falls back to a
+  // generic "Swing" if no catalog entry matches (legacy data, custom keys
+  // not yet added to catalog).
+  const planMeta = (key: string) => {
+    const def = plansCatalog.find((p) => p.key === key);
+    if (def) return { emoji: def.emoji, label: def.label };
+    if (key === "swing") return { emoji: "🔵", label: "Swing · 1H" };
+    if (key === "intraday") return { emoji: "🟣", label: "Intraday · 15m" };
+    return { emoji: "⚪", label: key };
+  };
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [page, setPage] = useState(0);
 
@@ -76,7 +84,7 @@ export default function SignalsTable({
   // (legacy rows). Only show the plan chip row if we see more than one plan,
   // mirroring the symbol-filter behavior.
   const uniquePlans = useMemo(() => {
-    const set = new Set<"swing" | "intraday">();
+    const set = new Set<string>();
     for (const r of rows) set.add(r.signal_type ?? "swing");
     return Array.from(set).sort();
   }, [rows]);
@@ -175,7 +183,7 @@ export default function SignalsTable({
             const planLosses = planRows.filter((r) => r.outcome === "LOSS_SL").length;
             const decided = planWins + planLosses;
             const planWinRate = decided > 0 ? Math.round((planWins / decided) * 100) : null;
-            const meta = PLAN_LABEL[p];
+            const meta = planMeta(p);
             return (
               <button
                 key={p}
@@ -351,6 +359,7 @@ export default function SignalsTable({
                     isAdmin={isAdmin}
                     onEdit={() => setEditing(r)}
                     isNew={isNew}
+                    planMeta={planMeta(r.signal_type ?? "swing")}
                   />
                 </div>
               );
