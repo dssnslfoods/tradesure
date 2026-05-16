@@ -16,6 +16,7 @@ import {
   triggerRunNow,
   addTradingPlan,
   removeTradingPlan,
+  setPlanTelegramEnabled,
 } from "./actions";
 import type { TradingPlan, TradingPlanDef } from "@/types/signal";
 import { DEFAULT_TRADING_PLAN_KEYS } from "@/types/signal";
@@ -500,6 +501,7 @@ export default function ScheduleControls({
           ) : (
             plansCatalog.map((def) => {
               const active = plans.includes(def.key);
+              const tgOff = def.telegram_enabled === false;
               return (
                 <button
                   key={def.key}
@@ -510,9 +512,17 @@ export default function ScheduleControls({
                       ? PLAN_COLOR_CLASSES[def.color]
                       : "border-white/5 bg-surface-2/60 text-ink-muted hover:text-ink-primary"
                   }`}
-                  title={def.description ?? `signal_type:"${def.key}"`}
+                  title={
+                    (def.description ?? `signal_type:"${def.key}"`) +
+                    (tgOff ? "\n📵 Telegram broadcast OFF — silent monitoring mode" : "")
+                  }
                 >
                   {def.emoji} {def.label}
+                  {tgOff && (
+                    <span className="ml-1.5 rounded bg-black/30 px-1 py-0.5 text-[9px] font-bold text-ink-faint">
+                      📵 silent
+                    </span>
+                  )}
                 </button>
               );
             })
@@ -958,10 +968,11 @@ function PlansCatalogManager({
           <div className="space-y-1.5">
             {plansCatalog.map((def) => {
               const isDefault = (DEFAULT_TRADING_PLAN_KEYS as readonly string[]).includes(def.key);
+              const tgOn = def.telegram_enabled !== false;
               return (
                 <div
                   key={def.key}
-                  className="flex items-center justify-between gap-2 rounded border border-white/5 bg-surface-1/50 px-3 py-2 text-[12px]"
+                  className="flex flex-wrap items-center justify-between gap-2 rounded border border-white/5 bg-surface-1/50 px-3 py-2 text-[12px]"
                 >
                   <div className="flex min-w-0 items-center gap-2">
                     <span className="text-base">{def.emoji}</span>
@@ -970,7 +981,24 @@ function PlansCatalogManager({
                       {def.key}
                     </code>
                   </div>
-                  <div className="flex items-center gap-1.5">
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    <button
+                      type="button"
+                      disabled={pending}
+                      onClick={() => safeRun(() => setPlanTelegramEnabled(def.key, !tgOn))}
+                      className={`chip !text-[10px] ${
+                        tgOn
+                          ? "!border-sig-buy/40 !bg-sig-buy/15 !text-sig-buy"
+                          : "!border-white/15 !bg-surface-2/60 !text-ink-muted"
+                      }`}
+                      title={
+                        tgOn
+                          ? "Telegram broadcast เปิดอยู่ — คลิกเพื่อปิด (ยัง track stats ปกติ)"
+                          : "Telegram broadcast ปิดอยู่ — คลิกเพื่อเปิด"
+                      }
+                    >
+                      📨 {tgOn ? "TG: ON" : "TG: OFF"}
+                    </button>
                     <span className="text-[10px] text-ink-faint">
                       color: <code>{def.color}</code>
                     </span>

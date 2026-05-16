@@ -441,6 +441,7 @@ const DEFAULT_CATALOG: TradingPlanDef[] = [
     emoji: "🔵",
     color: "info",
     description: "v2.1.1 indicator. EMA cross + Daily EMA200 regime filter.",
+    telegram_enabled: true,
   },
   {
     key: "intraday",
@@ -448,6 +449,7 @@ const DEFAULT_CATALOG: TradingPlanDef[] = [
     emoji: "🟣",
     color: "violet",
     description: "v4 indicator. Regime-gated asymmetric (EMA cross LONG / VWAP reclaim SHORT).",
+    telegram_enabled: true,
   },
 ];
 
@@ -472,6 +474,9 @@ function validatePlanDef(def: TradingPlanDef): void {
   if (def.description && def.description.length > 200) {
     throw new Error("plan description max 200 chars");
   }
+  if (def.telegram_enabled !== undefined && typeof def.telegram_enabled !== "boolean") {
+    throw new Error("plan telegram_enabled must be boolean");
+  }
 }
 
 export async function getTradingPlansCatalog(): Promise<TradingPlanDef[]> {
@@ -490,17 +495,39 @@ export async function getTradingPlansCatalog(): Promise<TradingPlanDef[]> {
   }
   const raw = data.value;
   if (!Array.isArray(raw)) return DEFAULT_CATALOG;
-  // Defensive filter — drop malformed entries instead of breaking the page
-  return raw.filter((p): p is TradingPlanDef => {
-    return (
-      p &&
-      typeof p === "object" &&
-      typeof p.key === "string" &&
-      typeof p.label === "string" &&
-      typeof p.emoji === "string" &&
-      typeof p.color === "string"
-    );
-  });
+  // Defensive filter — drop malformed entries instead of breaking the page.
+  // Also normalize: legacy entries without `telegram_enabled` default to true
+  // (preserve pre-Phase-2c broadcast behavior).
+  return raw
+    .filter((p): p is TradingPlanDef => {
+      return (
+        p &&
+        typeof p === "object" &&
+        typeof p.key === "string" &&
+        typeof p.label === "string" &&
+        typeof p.emoji === "string" &&
+        typeof p.color === "string"
+      );
+    })
+    .map((p) => ({
+      ...p,
+      telegram_enabled: typeof p.telegram_enabled === "boolean" ? p.telegram_enabled : true,
+    }));
+}
+
+/**
+ * Quick lookup used by the webhook process route to decide whether to
+ * broadcast a plan's signal to Telegram. Defaults to true if the plan
+ * isn't in the catalog (legacy / unknown key).
+ */
+export async function isPlanTelegramEnabled(planKey: string): Promise<boolean> {
+  try {
+    const cat = await getTradingPlansCatalog();
+    const def = cat.find((p) => p.key === planKey);
+    return def?.telegram_enabled !== false;
+  } catch {
+    return true;
+  }
 }
 
 export async function addTradingPlan(def: TradingPlanDef): Promise<TradingPlanDef[]> {

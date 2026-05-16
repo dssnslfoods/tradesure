@@ -9,6 +9,7 @@ import {
 import {
   getScheduleConfig,
   isWithinAiSchedule,
+  isPlanTelegramEnabled,
 } from "@/lib/schedule/settings";
 import type { TradingViewPayload } from "@/types/signal";
 
@@ -301,19 +302,29 @@ export async function POST(req: NextRequest) {
   const analysisId = analysisRow.id as string;
 
   // Phase 2: send Telegram for ALL signals so user sees the trade plan
-  // even on low-conviction setups. The message itself shows whether AI
-  // recommends taking the trade (badge + tagging). Stats are still
-  // tracked via `recommended` column for "win rate by confidence" views.
-  // The bot omits Telegram only if recommendation was downgraded AND
-  // env NOTIFY_NOT_RECOMMENDED=0 (default OFF — keep everything visible).
+  // even on low-conviction setups. Stats are still tracked via the
+  // `recommended` column for "win rate by confidence" views.
+  //
+  // Two gates can suppress Telegram broadcast (both default to allowing it):
+  //   1. Per-plan Telegram switch (catalog field `telegram_enabled`) —
+  //      lets admin silently monitor a new plan before promoting.
+  //   2. Env NOTIFY_NOT_RECOMMENDED=0 — suppresses all not-recommended
+  //      messages (good for cutting noise once stats stabilize).
+  const planTelegramOn = await isPlanTelegramEnabled(
+    String(payload.signal_type ?? "swing")
+  );
   const notifyNotRec = (process.env.NOTIFY_NOT_RECOMMENDED ?? "1") !== "0";
-  if (!recommended && !notifyNotRec) {
+  const tgSuppressed = !planTelegramOn || (!recommended && !notifyNotRec);
+  if (tgSuppressed) {
     return NextResponse.json({
       ok: true,
       signal_id: signalId,
       analysis_id: analysisId,
       telegram_sent: false,
-      filtered: true,
+      telegram_suppressed_reason: !planTelegramOn
+        ? "plan_telegram_disabled"
+        : "not_recommended_and_notify_off",
+      filtered: !recommended,
       outcome,
       recommended,
       filter_reason: filterReason,

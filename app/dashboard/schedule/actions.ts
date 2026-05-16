@@ -146,6 +146,14 @@ export async function removeTradingPlan(key: string) {
   return { ok: true, catalog: next };
 }
 
+export async function setPlanTelegramEnabled(key: string, enabled: boolean) {
+  await requireAdminOrThrow();
+  const next = await catalogUpdate(key, { telegram_enabled: enabled });
+  revalidatePath("/dashboard/schedule");
+  revalidatePath("/dashboard");
+  return { ok: true, catalog: next };
+}
+
 export async function setAiApiKey(provider: AiKeyProvider, key: string | null) {
   await requireAdminOrThrow();
   if (provider !== "openai" && provider !== "gemini") {

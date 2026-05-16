@@ -17,6 +17,12 @@ export interface TradingPlanDef {
   emoji: string;          // single emoji, e.g., "🟢"
   color: "info" | "violet" | "warn" | "buy" | "sell" | "brand"; // chip color
   description?: string;   // optional admin note
+  // Per-plan Telegram switch (Phase 2c, 2026-05-16). When false, signals
+  // for this plan are still accepted, analyzed by AI, and recorded in
+  // stats — but the Telegram broadcast is suppressed. Useful for silently
+  // monitoring a new plan's calibration before promoting it to users.
+  // Defaults to true if missing (legacy plans).
+  telegram_enabled?: boolean;
 }
 
 export interface TradingViewPayload {
