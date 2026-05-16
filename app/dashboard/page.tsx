@@ -6,6 +6,7 @@ import {
   type AiWindow,
 } from "@/lib/schedule/settings";
 import SignalsTable, { type SignalRow } from "./SignalsTable";
+import ConfidenceStatsTable from "./ConfidenceStatsTable";
 import BacktestButton from "./BacktestButton";
 import StatTile from "@/components/ui/StatTile";
 import Icon from "@/components/ui/Icon";
@@ -48,6 +49,8 @@ interface Row {
   stop_loss_num: number | null;
   take_profit_1_num: number | null;
   take_profit_2_num: number | null;
+  recommended: boolean | null;
+  recommendation_reason: string | null;
   tradingview_signals: { signal: string; price: number | null; signal_type: string | null } | null;
 }
 
@@ -61,10 +64,11 @@ async function loadRows(): Promise<Row[]> {
          telegram_sent, summary_th, signal_id,
          outcome, pnl_pct, outcome_at, bars_evaluated,
          entry_low, entry_high, stop_loss_num, take_profit_1_num, take_profit_2_num,
+         recommended, recommendation_reason,
          tradingview_signals:signal_id ( signal, price, signal_type )`
       )
       .order("created_at", { ascending: false })
-      .limit(100);
+      .limit(500);
     if (error) throw error;
     return (data ?? []) as unknown as Row[];
   } catch {
@@ -279,6 +283,16 @@ export default async function DashboardPage() {
           sparkColor={stats.totalPnl >= 0 ? "var(--buy)" : "var(--sell)"}
         />
       </section>
+
+      <ConfidenceStatsTable
+        rows={allRows.map((r) => ({
+          confidence: r.confidence,
+          outcome: r.outcome,
+          signal_type: r.tradingview_signals?.signal_type ?? null,
+          bias: r.bias,
+        }))}
+        plansCatalog={plansCatalog}
+      />
 
       <SignalsTable
         isAdmin={isAdmin}
