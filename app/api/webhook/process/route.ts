@@ -229,7 +229,14 @@ export async function POST(req: NextRequest) {
   let recommended = aiResult.recommended;
   let recReason: string | null = aiResult.recommendation_reason ?? null;
 
-  if (voteRejected) {
+  // Pine-side NO_TRADE always forces recommended=false — Pine indicator
+  // determined there's no clean setup. AI's direction guess is still
+  // recorded for stats tracking, but we never recommend taking it.
+  const pineSignal = String(payload.signal ?? "").toUpperCase();
+  if (pineSignal === "NO_TRADE") {
+    recommended = false;
+    recReason = recReason ?? "Pine indicator flagged NO_TRADE (no setup ตามเงื่อนไข indicator)";
+  } else if (voteRejected) {
     recommended = false;
     recReason = `Vote disagree — primary=${aiResult.bias}/${aiResult.confidence}%, secondary=${secondaryResult!.result.bias}/${secondaryResult!.result.confidence}%`;
   } else if (bkkHour !== null && BLOCKED_HOURS.includes(bkkHour)) {

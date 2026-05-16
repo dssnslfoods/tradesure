@@ -1,9 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSupabaseAdmin } from "@/lib/supabase/server";
-import {
-  broadcastTelegramMessage,
-  buildNoTradeMessage,
-} from "@/lib/telegram/sendTelegramMessage";
 import { isTradingPlanActive, getTradingPlansCatalog } from "@/lib/schedule/settings";
 import type { TradingPlan, TradingViewPayload } from "@/types/signal";
 
@@ -76,21 +72,13 @@ export async function POST(req: NextRequest) {
     });
   }
 
-  // ─── NO_TRADE fast path ──────────────────────────────────────────────────
-  // Pine fires this every confirmed bar when neither LONG nor SHORT setup is
-  // valid. We skip AI + DB storage and just notify Telegram so users know the
-  // bot is alive and *why* it stayed flat. Suppression via NOTRADE_TELEGRAM=0.
-  if (String(payload.signal).toUpperCase() === "NO_TRADE") {
-    const noTradeOn = (process.env.NOTRADE_TELEGRAM ?? "1") !== "0";
-    if (noTradeOn) {
-      const msg = buildNoTradeMessage(payload);
-      // Fire-and-forget so we respond to TradingView in <3s
-      void broadcastTelegramMessage(msg).catch((err) => {
-        console.error("[webhook] no-trade Telegram send failed:", err);
-      });
-    }
-    return NextResponse.json({ ok: true, no_trade: true });
-  }
+  // Phase 2 (2026-05-16): NO_TRADE no longer has a fast-path bypass —
+  // we let it flow through the same AI analysis pipeline so the system
+  // can track "what would the AI have decided when Pine said wait?"
+  // for confidence-bucket stats. The AI prompt picks a direction and
+  // marks recommended=false because Pine flagged NO_TRADE. If admin
+  // wants to suppress the resulting Telegram message, set env
+  // NOTIFY_NOT_RECOMMENDED=0 (covers all not-recommended signals).
 
   const supabase = getSupabaseAdmin();
 

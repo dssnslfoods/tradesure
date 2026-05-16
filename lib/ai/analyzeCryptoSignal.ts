@@ -26,6 +26,18 @@ const SYSTEM_PROMPT = `คุณคือผู้ช่วยวิเครา
 - ถ้า setup ไม่ดี → ตอบ recommended=false + confidence ต่ำ + risk_level=High
 - แต่ direction + ราคายังต้องบอก เพื่อให้ระบบ backtest + track win rate ตาม confidence ได้
 
+=== กฎกรณี signal = NO_TRADE (Pine heartbeat) ===
+ถ้า input signal เป็น "NO_TRADE" แปลว่า Pine indicator ไม่เจอ setup ที่ผ่านเงื่อนไข:
+- ยังต้องเลือก direction (LONG/SHORT) แบบ speculative — ใช้ trend EMA + RSI + macro
+- confidence ปกติต่ำ (30-55) — ระบุ setup อ่อนแอ
+- recommended = false เสมอ (Pine บอกว่ายังไม่ใช่จังหวะ)
+- คำนวณ entry/SL/TP จาก price + ATR เอง:
+  • LONG:  entry_low = price - 0.2×ATR, entry_high = price + 0.2×ATR
+           SL = price - 1.5×ATR, TP1 = price + 1.5×ATR, TP2 = price + 3×ATR
+  • SHORT: entry_low = price - 0.2×ATR, entry_high = price + 0.2×ATR
+           SL = price + 1.5×ATR, TP1 = price - 1.5×ATR, TP2 = price - 3×ATR
+- recommendation_reason ใส่ "Pine NO_TRADE — รอ setup" หรือ context อื่นที่เห็นใน reasons
+
 วิธีเลือก direction เมื่อ setup คลุมเครือ:
 1. ดู trend EMA → close > trend = LONG, close < trend = SHORT
 2. ถ้า trend EMA ไม่ชัด → ดู signal จาก Pine (BUY = LONG, SELL = SHORT)
@@ -134,12 +146,25 @@ function buildUserPrompt(p: TradingViewPayload, ctx?: MarketContext): string {
     macroBlock = "\n\n" + lines.join("\n");
   }
 
+  // Surface NO_TRADE reasons if Pine sent them — helps AI explain why setup
+  // is weak in its reasoning_th
+  const pineReasons = (p as TradingViewPayload & { reasons?: Record<string, boolean> }).reasons;
+  let reasonsBlock = "";
+  if (pineReasons && typeof pineReasons === "object") {
+    const flagged = Object.entries(pineReasons)
+      .filter(([, v]) => v === true)
+      .map(([k]) => k);
+    if (flagged.length > 0) {
+      reasonsBlock = `\nPine NO_TRADE reasons: ${flagged.join(", ")}`;
+    }
+  }
+
   return `วิเคราะห์สัญญาณ Crypto จาก TradingView ต่อไปนี้:
 
 เหรียญ (symbol): ${p.symbol}
 Exchange: ${p.exchange ?? "-"}
 Timeframe: ${p.interval}
-Signal: ${p.signal}
+Signal: ${p.signal}${reasonsBlock}
 ราคา (price): ${p.price}
 Strategy: ${p.strategy ?? "-"}
 RSI: ${p.rsi ?? "-"}
