@@ -208,35 +208,43 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  // ── Post-filter: decide the outcome bucket BEFORE inserting so the row is
-  //    correctly tagged and downstream backtest/analytics skip it cleanly.
-  let outcome: "SKIP_WAIT" | "SKIP_LOW_CONF" | "SKIP_HOUR" | "PENDING";
-  let filterReason: string | null = null;
+  // ── Always-direction filter logic (Phase 2 post-2026-05-16):
+  //    Every signal stored with bias=LONG/SHORT + outcome=PENDING so backtest
+  //    evaluates it. Filter rules now control `recommended` instead of
+  //    diverting to SKIP_* outcomes — keeps stats by-confidence-bucket
+  //    meaningful. recommendation_reason captures *why* not recommended.
 
   const bkkHour = bangkokHour(payload);
 
-  // Vote-mode: if dual-model active and models disagree → treat as WAIT.
+  // Vote-mode: if dual-model active and models disagree → not recommended.
   const voteRejected =
     secondaryResult !== null &&
     dualAgreement !== null &&
     !dualAgreement.biasAgree &&
-    // Only enforce when the request actually used vote mode (recorded in aiRaw.ai_mode)
     (aiRaw as { ai_mode?: string })?.ai_mode === "vote";
 
-  if (aiResult.bias === "WAIT") {
-    outcome = "SKIP_WAIT";
-  } else if (voteRejected) {
-    outcome = "SKIP_WAIT";
-    filterReason = `Vote mode: models disagree — primary=${aiResult.bias}/${aiResult.confidence}%, secondary=${secondaryResult!.result.bias}/${secondaryResult!.result.confidence}%`;
+  // Compose recommended: start from AI's own recommendation, then apply
+  // each filter as a possible downgrade. First failing rule wins (its
+  // reason is recorded in recommendation_reason).
+  let recommended = aiResult.recommended;
+  let recReason: string | null = aiResult.recommendation_reason ?? null;
+
+  if (voteRejected) {
+    recommended = false;
+    recReason = `Vote disagree — primary=${aiResult.bias}/${aiResult.confidence}%, secondary=${secondaryResult!.result.bias}/${secondaryResult!.result.confidence}%`;
   } else if (bkkHour !== null && BLOCKED_HOURS.includes(bkkHour)) {
-    outcome = "SKIP_HOUR";
-    filterReason = `Blocked hour ${String(bkkHour).padStart(2, "0")}:00 (BKK) — historical win rate < 40%`;
+    recommended = false;
+    recReason = `Blocked hour ${String(bkkHour).padStart(2, "0")}:00 (BKK) — historical win rate < 40%`;
   } else if (aiResult.confidence < MIN_CONFIDENCE) {
-    outcome = "SKIP_LOW_CONF";
-    filterReason = `AI confidence ${aiResult.confidence}% < threshold ${MIN_CONFIDENCE}%`;
-  } else {
-    outcome = "PENDING";
+    recommended = false;
+    recReason = recReason ?? `AI confidence ${aiResult.confidence}% < threshold ${MIN_CONFIDENCE}%`;
   }
+
+  // Outcome bucket — always PENDING so the backtest evaluator picks it up.
+  // Legacy SKIP_* outcomes are no longer emitted by this code path; they
+  // remain in DB on old rows and the dashboard still groups them as "skip".
+  const outcome: "PENDING" = "PENDING";
+  const filterReason = recommended ? null : recReason;
 
   // Mutate reasoning so the dashboard surfaces *why* a signal was filtered.
   const reasoningWithFilter = filterReason
@@ -266,6 +274,8 @@ export async function POST(req: NextRequest) {
       telegram_sent: false,
       ai_raw_response: aiRaw,
       outcome,
+      recommended,
+      recommendation_reason: recReason,
     })
     .select("id")
     .single();
@@ -283,8 +293,14 @@ export async function POST(req: NextRequest) {
 
   const analysisId = analysisRow.id as string;
 
-  // Skip Telegram for any non-actionable outcome.
-  if (outcome !== "PENDING") {
+  // Phase 2: send Telegram for ALL signals so user sees the trade plan
+  // even on low-conviction setups. The message itself shows whether AI
+  // recommends taking the trade (badge + tagging). Stats are still
+  // tracked via `recommended` column for "win rate by confidence" views.
+  // The bot omits Telegram only if recommendation was downgraded AND
+  // env NOTIFY_NOT_RECOMMENDED=0 (default OFF — keep everything visible).
+  const notifyNotRec = (process.env.NOTIFY_NOT_RECOMMENDED ?? "1") !== "0";
+  if (!recommended && !notifyNotRec) {
     return NextResponse.json({
       ok: true,
       signal_id: signalId,
@@ -292,6 +308,7 @@ export async function POST(req: NextRequest) {
       telegram_sent: false,
       filtered: true,
       outcome,
+      recommended,
       filter_reason: filterReason,
     });
   }

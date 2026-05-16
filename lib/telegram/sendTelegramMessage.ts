@@ -160,61 +160,47 @@ export function buildTelegramMessage(
     }
   }
 
-  const isWait = ai.bias === "WAIT";
   const contextLines = renderMarketContext(ctx);
   const secondOpinionLines = renderSecondOpinion(secondOpinion);
 
-  // ============= WAIT message: clear NO TRADE banner, no levels =============
-  if (isWait) {
-    const lines: string[] = [
-      `${planTag(payload.signal_type)} ⛔ <b>NO TRADE — ไม่แนะนำให้เข้า</b>`,
-      "━━━━━━━━━━━━━━━━━━━━",
-      "",
-      `เหรียญ: <b>${escapeHtml(payload.symbol)}</b>`,
-      `Timeframe: <b>${escapeHtml(payload.interval)}</b>`,
-      `Signal จาก TradingView: <b>${escapeHtml(payload.signal)}</b>`,
-      `ราคาปัจจุบัน: <b>${escapeHtml(fmtPrice(payload.price))}</b>`,
-      "",
-      "📊 <b>มุมมอง AI: WAIT</b>",
-      `ความมั่นใจ: <b>${ai.confidence}%</b>`,
-      `ความเสี่ยง: <b>${escapeHtml(ai.risk_level)}</b>`,
-      "",
-      "🚫 <b>เหตุผลที่ไม่แนะนำ:</b>",
-      escapeHtml(ai.summary_th),
-      "",
-      "📝 <b>รายละเอียด:</b>",
-      escapeHtml(ai.reasoning_th),
-    ];
-    if (secondOpinionLines.length > 0) {
-      lines.push("", ...secondOpinionLines);
-    }
-    if (contextLines.length > 0) {
-      lines.push("", ...contextLines);
-    }
-    lines.push(
-      "",
-      "💡 <i>รอสัญญาณที่ชัดเจนกว่านี้</i>",
-      "",
-      "━━━━━━━━━━━━━━━━━━━━",
-      "⚠️ <i>หมายเหตุ: ข้อมูลนี้เป็นเพียงการวิเคราะห์เพื่อประกอบการตัดสินใจ ไม่ใช่คำแนะนำทางการเงิน</i>"
-    );
-    return lines.join("\n");
-  }
+  // Phase 2 (2026-05-16): AI always returns LONG/SHORT with full levels.
+  // Recommendation status is shown as a banner so users see the trade plan
+  // even on low-conviction setups (stats tracking covers them).
+  const recommended = ai.recommended !== false; // default true if legacy/missing
+  const recReason = ai.recommendation_reason ?? null;
 
-  // ============= LONG/SHORT message: full trade plan =============
+  // Header — different banner for recommended vs not recommended
+  const header = recommended
+    ? `${planTag(payload.signal_type)} 🚨 <b>Crypto AI Signal Alert</b>`
+    : `${planTag(payload.signal_type)} ⚠️ <b>Low-Conviction Signal — ดูเฉยๆ ไม่แนะนำเทรด</b>`;
+
   const lines: string[] = [
-    `${planTag(payload.signal_type)} 🚨 <b>Crypto AI Signal Alert</b>`,
+    header,
+    ...(recommended ? [] : ["━━━━━━━━━━━━━━━━━━━━"]),
     "",
     `เหรียญ: <b>${escapeHtml(payload.symbol)}</b>`,
     `Timeframe: <b>${escapeHtml(payload.interval)}</b>`,
     `Signal จาก TradingView: <b>${escapeHtml(payload.signal)}</b>`,
     `ราคา: <b>${escapeHtml(fmtPrice(payload.price))}</b>`,
     "",
-    `📊 มุมมอง AI: <b>${escapeHtml(ai.bias)}</b>`,
-    `ความมั่นใจ: <b>${ai.confidence}%</b>`,
+    `📊 มุมมอง AI: <b>${escapeHtml(ai.bias)}</b>` +
+      (recommended ? " ✅" : " ⚠️"),
+    `ความมั่นใจ: <b>${ai.confidence}%</b>` +
+      (ai.confidence >= 80 ? " 🔥" : ai.confidence >= 60 ? "" : " 🐌"),
     `ความเสี่ยง: <b>${escapeHtml(ai.risk_level)}</b>`,
+    `แผนเทรด: <b>${escapeHtml(payload.signal_type ?? "swing")}</b>`,
   ];
   if (rrLine) lines.push(rrLine);
+
+  // If not recommended, show the reason prominently BEFORE the trade plan
+  if (!recommended && recReason) {
+    lines.push(
+      "",
+      "🚫 <b>เหตุผลที่ไม่แนะนำ:</b>",
+      escapeHtml(recReason)
+    );
+  }
+
   lines.push(
     "",
     "🎯 <b>Entry Zone:</b>",
@@ -238,6 +224,14 @@ export function buildTelegramMessage(
   }
   if (contextLines.length > 0) {
     lines.push("", ...contextLines);
+  }
+
+  // Closing note — different tone for recommended vs not
+  if (!recommended) {
+    lines.push(
+      "",
+      "💡 <i>Signal นี้ถูกบันทึกเพื่อ track สถิติเท่านั้น — ไม่แนะนำให้เข้าจริง</i>"
+    );
   }
   lines.push(
     "",

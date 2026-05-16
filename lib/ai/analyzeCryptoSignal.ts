@@ -18,31 +18,47 @@ const SYSTEM_PROMPT = `คุณคือผู้ช่วยวิเครา
 - เขียนกระชับ ชัดเจน อ่านง่ายบน Telegram
 - ตอบกลับเป็น JSON เท่านั้น ไม่ต้องอธิบายเพิ่ม
 
+=== กฎ "Always-direction" (สำคัญ — ห้าม WAIT) ===
+ระบบเก็บสถิติทุกสัญญาณเพื่อวัด edge per-confidence-bucket — ดังนั้น:
+- **ห้ามตอบ "WAIT"** ไม่ว่ากรณีใดๆ
+- ต้องเลือก bias เป็น "LONG" หรือ "SHORT" ทุกครั้ง — แม้ setup จะอ่อนแอ
+- ต้องระบุ entry / SL / TP1 / TP2 เป็นตัวเลขทุกครั้ง (ห้าม null)
+- ถ้า setup ไม่ดี → ตอบ recommended=false + confidence ต่ำ + risk_level=High
+- แต่ direction + ราคายังต้องบอก เพื่อให้ระบบ backtest + track win rate ตาม confidence ได้
+
+วิธีเลือก direction เมื่อ setup คลุมเครือ:
+1. ดู trend EMA → close > trend = LONG, close < trend = SHORT
+2. ถ้า trend EMA ไม่ชัด → ดู signal จาก Pine (BUY = LONG, SELL = SHORT)
+3. ถ้ายังไม่ชัด → ดู RSI (>50 = LONG, <50 = SHORT)
+4. ถ้ายังไม่ชัด → bias = LONG (default — ตลาดมี long bias ในระยะยาว)
+
 === กฎ Market Regime ===
 ประเมิน regime ก่อนตัดสินใจเสมอ:
-- TRENDING: ADX >= 25 และ trend EMA ชัดเจน → ส่งสัญญาณตามเทรนด์ได้
-- RANGING:  ADX < 20 หรือ ATR% < 0.30 → ตอบ WAIT (ตลาด chop / dead)
-- VOLATILE: ATR% > 1.5 → confidence ไม่เกิน 55 (ความเสี่ยง slippage สูง)
+- TRENDING: ADX >= 25 และ trend EMA ชัดเจน → confidence 70-95
+- RANGING:  ADX < 20 หรือ ATR% < 0.30 → confidence 30-50 + recommended=false
+- VOLATILE: ATR% > 1.5 → confidence ไม่เกิน 55 + risk_level=High
 
 === กฎ Confidence Calibration (สำคัญมาก) ===
 ห้ามให้คะแนน confidence "เกาะกลุ่ม" 70-80 ทุกครั้ง — ต้องกระจายตาม checklist ที่ผ่าน:
-- 90-100: setup เกือบ perfect (ADX > 30, volume > 1.5× MA, HTF aligned, RSI อยู่ใน sweet spot, R:R ≥ 2)
-- 75-89:  setup ดี ผ่านเงื่อนไขหลักครบ (trend + volume + RSI)
-- 60-74:  setup พอใช้ ผ่านเกณฑ์บางส่วน
-- 50-59:  setup คลุมเครือ → ตอบ WAIT
-- < 50:   signal อ่อน → ตอบ WAIT
+- 90-100: setup เกือบ perfect (ADX > 30, volume > 1.5× MA, HTF aligned, RSI อยู่ใน sweet spot, R:R ≥ 2) — recommended=true
+- 75-89:  setup ดี ผ่านเงื่อนไขหลักครบ (trend + volume + RSI) — recommended=true
+- 60-74:  setup พอใช้ ผ่านเกณฑ์บางส่วน — recommended=true ถ้า R:R ≥ 1.5, ไม่งั้น false
+- 50-59:  setup คลุมเครือ — recommended=false (แต่ direction + ราคายังต้องบอก)
+- 30-49:  signal อ่อน — recommended=false + risk_level=High
+- < 30:   signal แย่มาก — recommended=false + risk_level=High
 
-=== กฎบังคับให้ตอบ WAIT (override ทุกอย่าง) ===
-- ADX < 20 หรือ ATR% < 0.30 (ตลาด ranging/dead) → WAIT
-- R:R (TP1-entry) / (entry-SL) < 1.0 → WAIT
-- Volume < 0.8× MA (volume bot) → WAIT
-- ข้อมูลไม่เพียงพอ → WAIT
-ถ้า bias = WAIT → เซต entry/SL/TP เป็น null และอธิบายเหตุผลใน reasoning_th
+=== กฎ "ไม่แนะนำ" (recommended=false) — override ทุกอย่าง ===
+ตอบ recommended=false (แต่ยัง bias + ราคา ครบ) เมื่อ:
+- ADX < 20 หรือ ATR% < 0.30 (ตลาด ranging/dead)
+- R:R (TP1-entry) / (entry-SL) < 1.0
+- Volume < 0.8× MA
+- ข้อมูลไม่เพียงพอ
+- Setup ขัด trend HTF อย่างชัดเจน
 
 === กฎ checklist ===
 ต้องตอบ field "checklist" เป็น JSON object ระบุว่าผ่านเงื่อนไขใดบ้าง:
 { "trend_aligned": bool, "volume_confirms": bool, "rsi_in_zone": bool, "rr_acceptable": bool, "regime": "TRENDING"|"RANGING"|"VOLATILE" }
-ต้องผ่านอย่างน้อย 3/4 ถึงให้ LONG/SHORT ได้ (regime = RANGING → WAIT เสมอ)
+ผ่าน ≥ 3/4 → recommended=true. ผ่าน < 3/4 → recommended=false.
 
 === Market Context Rules (สำคัญ — ปรับ confidence ตาม macro) ===
 • Fear & Greed Index:
@@ -146,7 +162,9 @@ Volume vs MA: ${volMult}× (>1.3× = good, <0.8× = weak)
     "rr_acceptable": true | false,
     "regime": "TRENDING" | "RANGING" | "VOLATILE"
   },
-  "bias": "LONG" | "SHORT" | "WAIT",
+  "bias": "LONG" | "SHORT",
+  "recommended": true | false,
+  "recommendation_reason": "ถ้า recommended=false ใส่เหตุผลสั้นๆ ที่นี่ (ไม่เกิน 100 ตัวอักษร) เช่น 'ADX 18 ตลาด ranging' หรือ 'R:R 0.8 ต่ำกว่า 1'. ถ้า recommended=true ตอบ null หรือ ''",
   "confidence": 0-100,
   "entry_zone": "ข้อความบรรยาย เช่น 65000 - 65300",
   "entry_low": ตัวเลขขอบล่างของโซนเข้า,
@@ -162,13 +180,32 @@ Volume vs MA: ${volMult}× (>1.3× = good, <0.8× = weak)
   "reasoning_th": "เหตุผลประกอบสั้น ๆ — ระบุด้วยว่า regime อะไร และผ่าน checklist กี่ข้อ"
 }
 
-ย้ำ: ถ้า regime = RANGING หรือ checklist ผ่าน < 3/4 หรือ R:R < 1.0 → bias = "WAIT" และ set ราคาทุกตัวเป็น null`;
+ย้ำ:
+- bias ต้องเป็น "LONG" หรือ "SHORT" เท่านั้น (ห้าม WAIT)
+- entry/SL/TP1/TP2 ต้องเป็นตัวเลขเสมอ (ห้าม null) แม้ recommended=false
+- recommended=false เมื่อ setup ไม่ดี — แต่ยังต้องตอบ direction + ราคาทุก field`;
 }
 
-function coerceBias(v: unknown): AIBias {
+// Post-Phase-2: AI should never return WAIT. If it does (legacy model, prompt
+// drift) we coerce to a direction based on the Pine signal. WAIT is preserved
+// as an option only for backward compat with stale rows in DB.
+function coerceBias(v: unknown, pineSignal?: string): AIBias {
   const s = String(v ?? "").toUpperCase();
-  if (s === "LONG" || s === "SHORT" || s === "WAIT") return s;
-  return "WAIT";
+  if (s === "LONG" || s === "SHORT") return s;
+  // AI returned WAIT / null / unknown — fall back to Pine signal direction
+  const pine = String(pineSignal ?? "").toUpperCase();
+  if (pine === "BUY"  || pine === "LONG")  return "LONG";
+  if (pine === "SELL" || pine === "SHORT") return "SHORT";
+  // Last resort: default to LONG (market has long bias on long timeframes)
+  return "LONG";
+}
+
+function coerceBool(v: unknown, fallback: boolean): boolean {
+  if (typeof v === "boolean") return v;
+  const s = String(v ?? "").toLowerCase().trim();
+  if (s === "true"  || s === "1" || s === "yes") return true;
+  if (s === "false" || s === "0" || s === "no")  return false;
+  return fallback;
 }
 
 function coerceRisk(v: unknown): RiskLevel {
@@ -287,9 +324,24 @@ export async function analyzeCryptoSignal(
     }
   }
 
+  // recommended defaults to true when AI provides a clear LONG/SHORT direction
+  // and confidence ≥ 60. The pipeline can override this to false later based
+  // on filter rules (blocked hour, vote disagree, etc.).
+  const aiConfidence = coerceConfidence(parsed.confidence);
+  const aiBias = coerceBias(parsed.bias, payload.signal);
+  const recDefault = aiConfidence >= 60;
+  const aiRecommended = coerceBool(parsed.recommended, recDefault);
+  const recReasonRaw = parsed.recommendation_reason;
+  const recReason =
+    typeof recReasonRaw === "string" && recReasonRaw.trim().length > 0
+      ? recReasonRaw.trim()
+      : null;
+
   const result: AIAnalysisResult = {
-    bias: coerceBias(parsed.bias),
-    confidence: coerceConfidence(parsed.confidence),
+    bias: aiBias,
+    confidence: aiConfidence,
+    recommended: aiRecommended,
+    recommendation_reason: recReason,
     entry_zone: String(parsed.entry_zone ?? "-"),
     entry_low: coerceNumeric(parsed.entry_low),
     entry_high: coerceNumeric(parsed.entry_high),

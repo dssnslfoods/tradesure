@@ -38,12 +38,22 @@ export interface TradingViewPayload {
   [key: string]: unknown;
 }
 
+// Post-Phase-2 (2026-05-16): AI now always returns LONG or SHORT — never
+// WAIT. WAIT is kept in the union only so legacy rows still type-check.
 export type AIBias = "LONG" | "SHORT" | "WAIT";
 export type RiskLevel = "Low" | "Medium" | "High";
 
 export interface AIAnalysisResult {
   bias: AIBias;
   confidence: number;
+  // Whether AI recommends taking this trade. Independent of bias direction —
+  // a non-recommended signal still has full entry/SL/TP so the system can
+  // backtest and aggregate stats by confidence bucket. The pipeline overrides
+  // this to false when filter rules (blocked hour, vote disagree, threshold)
+  // would have rejected the trade.
+  recommended: boolean;
+  // Optional reason when recommended=false (AI's reasoning OR a filter reason)
+  recommendation_reason?: string | null;
   entry_zone: string;
   entry_low: number | null;
   entry_high: number | null;
