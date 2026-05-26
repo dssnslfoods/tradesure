@@ -503,6 +503,98 @@ export async function sendTelegramToChat(
   }
 }
 
+// ─── Interactive helpers (inline keyboards + callback queries) ─────────────
+// Used by the on-demand "ask the bot" feature in app/api/telegram/bot.
+
+export interface InlineButton {
+  text: string;
+  callback_data: string; // ≤ 64 bytes
+}
+
+/**
+ * Send a message with an inline keyboard. `rows` is a 2D array — each inner
+ * array is a row of buttons. Returns the sent message_id so callers can
+ * later edit it (e.g., swap the keyboard for a result).
+ */
+export async function sendTelegramWithKeyboard(
+  chatId: string,
+  message: string,
+  rows: InlineButton[][]
+): Promise<{ ok: boolean; messageId?: number; error?: string }> {
+  const token = process.env.TELEGRAM_BOT_TOKEN;
+  if (!token) return { ok: false, error: "Missing TELEGRAM_BOT_TOKEN" };
+  try {
+    const res = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        chat_id: chatId,
+        text: message,
+        parse_mode: "HTML",
+        disable_web_page_preview: true,
+        reply_markup: { inline_keyboard: rows },
+      }),
+    });
+    const data = (await res.json().catch(() => null)) as
+      | { ok: boolean; result?: { message_id: number } }
+      | null;
+    if (data?.ok && data.result) return { ok: true, messageId: data.result.message_id };
+    return { ok: false, error: `Telegram response not ok: ${JSON.stringify(data).slice(0, 300)}` };
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : "Unknown telegram error" };
+  }
+}
+
+/** Edit an existing message's text (and optionally its keyboard). */
+export async function editTelegramMessage(
+  chatId: string,
+  messageId: number,
+  message: string,
+  rows?: InlineButton[][]
+): Promise<{ ok: boolean; error?: string }> {
+  const token = process.env.TELEGRAM_BOT_TOKEN;
+  if (!token) return { ok: false, error: "Missing TELEGRAM_BOT_TOKEN" };
+  try {
+    const res = await fetch(`https://api.telegram.org/bot${token}/editMessageText`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        chat_id: chatId,
+        message_id: messageId,
+        text: message,
+        parse_mode: "HTML",
+        disable_web_page_preview: true,
+        ...(rows ? { reply_markup: { inline_keyboard: rows } } : {}),
+      }),
+    });
+    if (res.ok) return { ok: true };
+    return { ok: false, error: `Telegram HTTP ${res.status}` };
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : "Unknown telegram error" };
+  }
+}
+
+/** Acknowledge a callback query (stops the button's loading spinner). */
+export async function answerCallbackQuery(
+  callbackQueryId: string,
+  text?: string
+): Promise<void> {
+  const token = process.env.TELEGRAM_BOT_TOKEN;
+  if (!token) return;
+  try {
+    await fetch(`https://api.telegram.org/bot${token}/answerCallbackQuery`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        callback_query_id: callbackQueryId,
+        ...(text ? { text } : {}),
+      }),
+    });
+  } catch {
+    // best-effort
+  }
+}
+
 // Broadcast a signal-style alert to every active auth_user's Telegram
 // chat plus the env TELEGRAM_CHAT_ID (which may be a shared channel or
 // the original admin chat). De-duplicates by chat_id so admins linked
