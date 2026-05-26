@@ -318,3 +318,19 @@ export async function deleteContact(contactId: string) {
   revalidatePath("/dashboard/users");
   return { ok: true };
 }
+
+// Toggle the on-demand AI-chat feature for a Telegram contact. Admins are
+// always allowed regardless of this flag (resolved at request time), so
+// this only matters for non-admin contacts.
+export async function setContactAiChatEnabled(contactId: string, enabled: boolean) {
+  const guard = await requireAdmin();
+  if (!guard.ok) return guard;
+  const supabase = getSupabaseAdmin();
+  const { error } = await supabase
+    .from("telegram_contacts")
+    .update({ ai_chat_enabled: enabled })
+    .eq("id", contactId);
+  if (error) return { ok: false, error: error.message };
+  revalidatePath("/dashboard/users");
+  return { ok: true };
+}

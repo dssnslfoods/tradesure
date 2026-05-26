@@ -32,6 +32,7 @@ export interface ContactRow {
   last_message_text: string | null;
   message_count: number;
   registered_user_id: string | null;
+  ai_chat_enabled: boolean;
   first_seen_at: string;
   last_seen_at: string;
 }
@@ -70,7 +71,7 @@ export default async function UsersPage() {
     supabase
       .from("telegram_contacts")
       .select(
-        "id, chat_id, username, first_name, last_name, language_code, is_bot, last_message_text, message_count, registered_user_id, first_seen_at, last_seen_at"
+        "id, chat_id, username, first_name, last_name, language_code, is_bot, last_message_text, message_count, registered_user_id, ai_chat_enabled, first_seen_at, last_seen_at"
       )
       .order("last_seen_at", { ascending: false }),
   ]);

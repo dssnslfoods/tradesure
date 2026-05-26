@@ -7,6 +7,7 @@ import {
   deleteContact,
   setUserActive,
   setUserAdmin,
+  setContactAiChatEnabled,
 } from "./actions";
 import type { UserRow, ContactRow } from "./page";
 import TelegramWebhookPanel from "./TelegramWebhookPanel";
@@ -114,7 +115,7 @@ export default function UsersClient({
             <table className="min-w-full divide-y divide-white/5 text-[12px]">
               <thead className="bg-surface-2/40 text-left">
                 <tr>
-                  {["Name","Username","Chat ID","Last message","Msgs","Last seen","Status","Actions"].map(h => (
+                  {["Name","Username","Chat ID","Last message","Msgs","Last seen","Status","AI chat","Actions"].map(h => (
                     <th key={h} className="px-4 py-3 eyebrow !text-[10px]">{h}</th>
                   ))}
                 </tr>
@@ -122,7 +123,7 @@ export default function UsersClient({
               <tbody className="divide-y divide-white/5">
                 {visibleContacts.length === 0 && (
                   <tr>
-                    <td colSpan={8} className="px-4 py-12 text-center">
+                    <td colSpan={9} className="px-4 py-12 text-center">
                       <span className="mx-auto mb-2 flex h-10 w-10 items-center justify-center rounded-full bg-sig-buy/15 text-sig-buy">
                         <Icon name="circle-check" size={18} />
                       </span>
@@ -292,6 +293,13 @@ function ContactRowItem({
     });
   };
 
+  const onToggleAiChat = () => {
+    startTransition(async () => {
+      await setContactAiChatEnabled(c.id, !c.ai_chat_enabled);
+      router.refresh();
+    });
+  };
+
   return (
     <tr className="hover:bg-surface-2/30">
       <td className="whitespace-nowrap px-4 py-3">
@@ -329,6 +337,25 @@ function ContactRowItem({
             pending
           </span>
         )}
+      </td>
+      <td className="px-4 py-3">
+        <button
+          type="button"
+          onClick={onToggleAiChat}
+          disabled={pending}
+          className={`chip !text-[10px] transition disabled:opacity-40 ${
+            c.ai_chat_enabled
+              ? "!border-sig-buy/40 !bg-sig-buy/15 !text-sig-buy"
+              : "!border-white/15 !bg-surface-2/60 !text-ink-muted hover:!text-ink-primary"
+          }`}
+          title={
+            c.ai_chat_enabled
+              ? "ใช้ฟีเจอร์ถาม AI ผ่าน Telegram ได้ — คลิกเพื่อปิด"
+              : "ยังถาม AI ผ่าน Telegram ไม่ได้ — คลิกเพื่อเปิด (admin ใช้ได้เสมอ)"
+          }
+        >
+          🤖 {c.ai_chat_enabled ? "ON" : "OFF"}
+        </button>
       </td>
       <td className="whitespace-nowrap px-4 py-3 text-right">
         <div className="inline-flex gap-1">
