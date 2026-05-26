@@ -239,16 +239,43 @@ async function handleCallback(cb: TelegramCallbackQuery): Promise<NextResponse> 
 }
 
 // ─── Detect whether a free-text message is a symbol query ──────────────────
+// Common non-symbol words to ignore when scanning a phrase for a ticker.
+const STOPWORDS = new Set([
+  "analyze", "analyse", "check", "ดู", "วิเคราะห์", "ขอ", "หน่อย", "ครับ",
+  "ค่ะ", "please", "pls", "the", "a", "an", "now", "ตอนนี้", "เหรียญ",
+  "coin", "signal", "สัญญาณ", "ราคา", "price", "buy", "sell", "long", "short",
+]);
+
+// Case-insensitive symbol extraction. Handles:
+//   "btc"  "BTCUSDT"  "Eth"            → single token
+//   "/analyze sol"  "/a BTC"           → command
+//   "ดู btc หน่อย"  "analyze ETHUSDT"  → token inside a phrase
 function parseSymbolQuery(text: string): string | null {
   const t = text.trim();
+  if (!t) return null;
+
+  // /analyze <x> or /a <x>
   if (t.startsWith("/")) {
-    // /analyze BTC  or  /a ETHUSDT
     const m = t.match(/^\/(?:analyze|a)\s+(.+)$/i);
     if (m) return normalizeSymbol(m[1]);
     return null;
   }
-  // Plain token like "BTC", "ETHUSDT", "sol" — single word, alphanumeric
+
+  // Whole message is a single alphanumeric token (any case)
   if (/^[A-Za-z0-9]{2,20}$/.test(t)) return normalizeSymbol(t);
+
+  // Otherwise scan the phrase for a likely ticker token. Prefer a token that
+  // already ends in USDT/USD; else fall back to the first non-stopword
+  // alphabetic token of length 2-10.
+  const tokens = t.split(/[\s,]+/).filter(Boolean);
+  const usdtToken = tokens.find((w) => /^[A-Za-z]{2,15}(USDT|USD)$/i.test(w));
+  if (usdtToken) return normalizeSymbol(usdtToken);
+
+  const candidate = tokens.find(
+    (w) => /^[A-Za-z]{2,10}$/.test(w) && !STOPWORDS.has(w.toLowerCase())
+  );
+  if (candidate) return normalizeSymbol(candidate);
+
   return null;
 }
 
