@@ -334,3 +334,19 @@ export async function setContactAiChatEnabled(contactId: string, enabled: boolea
   revalidatePath("/dashboard/users");
   return { ok: true };
 }
+
+// Toggle the on-demand AI-chat feature for a registered user. Admins are
+// always allowed regardless. This is the primary control surface — once a
+// contact becomes a user, manage their access here.
+export async function setUserAiChatEnabled(userId: string, enabled: boolean) {
+  const guard = await requireAdmin();
+  if (!guard.ok) return guard;
+  const supabase = getSupabaseAdmin();
+  const { error } = await supabase
+    .from("auth_users")
+    .update({ ai_chat_enabled: enabled })
+    .eq("id", userId);
+  if (error) return { ok: false, error: error.message };
+  revalidatePath("/dashboard/users");
+  return { ok: true };
+}

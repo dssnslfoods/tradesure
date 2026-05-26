@@ -63,14 +63,17 @@ export async function GET() {
 // contacts need telegram_contacts.ai_chat_enabled = true.
 async function canUseAiChat(chatId: string): Promise<boolean> {
   const supabase = getSupabaseAdmin();
-  const { data: admin } = await supabase
+  // 1. Registered user by chat_id — admin always allowed; others need their
+  //    own ai_chat_enabled flag (managed from the Auth users table).
+  const { data: user } = await supabase
     .from("auth_users")
-    .select("id")
+    .select("is_admin, ai_chat_enabled")
     .eq("telegram_chat_id", chatId)
-    .eq("is_admin", true)
     .eq("is_active", true)
     .maybeSingle();
-  if (admin) return true;
+  if (user?.is_admin) return true;
+  if (user?.ai_chat_enabled === true) return true;
+  // 2. Fallback for not-yet-registered contacts.
   const { data: contact } = await supabase
     .from("telegram_contacts")
     .select("ai_chat_enabled")

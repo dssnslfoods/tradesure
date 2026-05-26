@@ -17,6 +17,7 @@ export interface UserRow {
   telegram_chat_id: string;
   is_active: boolean;
   is_admin: boolean;
+  ai_chat_enabled: boolean;
   created_at: string;
   last_login_at: string | null;
 }
@@ -65,7 +66,7 @@ export default async function UsersPage() {
     supabase
       .from("auth_users")
       .select(
-        "id, username, display_name, telegram_chat_id, is_active, is_admin, created_at, last_login_at"
+        "id, username, display_name, telegram_chat_id, is_active, is_admin, ai_chat_enabled, created_at, last_login_at"
       )
       .order("created_at", { ascending: false }),
     supabase

@@ -8,6 +8,7 @@ import {
   setUserActive,
   setUserAdmin,
   setContactAiChatEnabled,
+  setUserAiChatEnabled,
 } from "./actions";
 import type { UserRow, ContactRow } from "./page";
 import TelegramWebhookPanel from "./TelegramWebhookPanel";
@@ -62,7 +63,7 @@ export default function UsersClient({
             <table className="min-w-full divide-y divide-white/5 text-[12px]">
               <thead className="bg-surface-2/40 text-left">
                 <tr>
-                  {["Username","Display name","Chat ID","Created","Last login","Active","Admin"].map(h => (
+                  {["Username","Display name","Chat ID","Created","Last login","Active","Admin","AI chat"].map(h => (
                     <th key={h} className="px-4 py-3 eyebrow !text-[10px]">{h}</th>
                   ))}
                 </tr>
@@ -208,6 +209,13 @@ function UserRowItem({
       else router.refresh();
     });
   };
+  const onToggleAiChat = () => {
+    startTransition(async () => {
+      const res = await setUserAiChatEnabled(u.id, !u.ai_chat_enabled);
+      if (!res.ok) onError(res.error ?? "failed");
+      else router.refresh();
+    });
+  };
 
   return (
     <tr className={`hover:bg-surface-2/30 ${isMe ? "bg-sig-info/[0.04]" : ""}`}>
@@ -269,6 +277,27 @@ function UserRowItem({
         >
           <Icon name={u.is_admin ? "shield-check" : "user"} size={11} />
           {u.is_admin ? "admin" : "user"}
+        </button>
+      </td>
+      <td className="px-4 py-3">
+        <button
+          type="button"
+          onClick={onToggleAiChat}
+          disabled={pending || u.is_admin}
+          title={
+            u.is_admin
+              ? "admin ใช้ฟีเจอร์ถาม AI ได้เสมอ (ไม่ต้องเปิด)"
+              : u.ai_chat_enabled
+              ? "ถาม AI ผ่าน Telegram ได้ — คลิกเพื่อปิด"
+              : "ยังถาม AI ผ่าน Telegram ไม่ได้ — คลิกเพื่อเปิด"
+          }
+          className={`chip !text-[10px] disabled:cursor-not-allowed disabled:opacity-50 ${
+            u.is_admin || u.ai_chat_enabled
+              ? "!border-sig-buy/40 !bg-sig-buy/15 !text-sig-buy"
+              : "!border-white/15 !bg-surface-2/60 !text-ink-muted"
+          }`}
+        >
+          🤖 {u.is_admin ? "always" : u.ai_chat_enabled ? "ON" : "OFF"}
         </button>
       </td>
     </tr>
