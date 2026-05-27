@@ -1,6 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSupabaseAdmin } from "@/lib/supabase/server";
-import { isTradingPlanActive, getTradingPlansCatalog } from "@/lib/schedule/settings";
+import {
+  isTradingPlanActive,
+  getTradingPlansCatalog,
+  isPlanTelegramEnabled,
+} from "@/lib/schedule/settings";
 import type { TradingPlan, TradingViewPayload } from "@/types/signal";
 
 export const runtime = "nodejs";
@@ -72,13 +76,29 @@ export async function POST(req: NextRequest) {
     });
   }
 
-  // Phase 2 (2026-05-16): NO_TRADE no longer has a fast-path bypass —
-  // we let it flow through the same AI analysis pipeline so the system
-  // can track "what would the AI have decided when Pine said wait?"
-  // for confidence-bucket stats. The AI prompt picks a direction and
-  // marks recommended=false because Pine flagged NO_TRADE. If admin
-  // wants to suppress the resulting Telegram message, set env
-  // NOTIFY_NOT_RECOMMENDED=0 (covers all not-recommended signals).
+  // ─── NO_TRADE fast path (restored 2026-05-26) ───────────────────────────
+  // Routing NO_TRADE through full AI analysis flooded the dashboard (every
+  // bar close = 1 analysis row × 3 plans = ~168 rows/day) and pushed real
+  // WIN/LOSS signals out of the recent-rows window, plus burned AI credits.
+  // NO_TRADE "win rate" is meaningless anyway (Pine says there's no setup).
+  // So NO_TRADE again skips AI + DB storage and only sends a lightweight
+  // heartbeat. Real BUY/SELL signals still get the always-direction
+  // analysis + confidence-bucket tracking. Heartbeat respects both the
+  // per-plan Telegram toggle and the NOTRADE_TELEGRAM env switch.
+  if (String(payload.signal).toUpperCase() === "NO_TRADE") {
+    const globalOn = (process.env.NOTRADE_TELEGRAM ?? "1") !== "0";
+    const planOn = await isPlanTelegramEnabled(planType);
+    if (globalOn && planOn) {
+      const { buildNoTradeMessage, broadcastTelegramMessage } = await import(
+        "@/lib/telegram/sendTelegramMessage"
+      );
+      const msg = buildNoTradeMessage(payload);
+      void broadcastTelegramMessage(msg).catch((err) => {
+        console.error("[webhook] no-trade Telegram send failed:", err);
+      });
+    }
+    return NextResponse.json({ ok: true, no_trade: true });
+  }
 
   const supabase = getSupabaseAdmin();
 
