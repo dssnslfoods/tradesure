@@ -57,7 +57,13 @@ interface QueuedRow {
  * stays within the 60s function timeout even with slow OpenAI responses.
  */
 export async function POST(req: NextRequest) {
-  if (!(await isCurrentUserAdmin())) {
+  // Two ways in: admin cookie (dashboard button) OR cron secret (automated
+  // job). The cron path lets /api/cron/tick drain the queue unattended.
+  const cronSecret = process.env.BACKTEST_CRON_SECRET;
+  const gotSecret =
+    req.headers.get("x-cron-secret") ?? req.nextUrl.searchParams.get("secret");
+  const viaSecret = Boolean(cronSecret && gotSecret === cronSecret);
+  if (!viaSecret && !(await isCurrentUserAdmin())) {
     return NextResponse.json({ ok: false, error: "Admin only" }, { status: 403 });
   }
 

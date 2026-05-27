@@ -1,0 +1,37 @@
+name: Signal automation tick
+
+# Drains QUEUED signals (runs AI) and resolves PENDING/OPEN outcomes via
+# backtest, so every TradingView alert ends up tracked + shown in stats
+# with no manual button-pressing. Hits /api/cron/tick which fans out to
+# process-queued + backtest/run.
+#
+# Requires repo secret BACKTEST_CRON_SECRET (matches the backend env var).
+# Add at: Settings → Secrets and variables → Actions → New repository secret.
+
+on:
+  schedule:
+    # Every 15 minutes (UTC). GitHub cron can drift a few minutes — fine for
+    # this use case since outcomes resolve over hours.
+    - cron: "*/15 * * * *"
+  workflow_dispatch: {} # allow manual run from the Actions tab
+
+jobs:
+  tick:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger automation tick
+        run: |
+          if [ -z "${{ secrets.BACKTEST_CRON_SECRET }}" ]; then
+            echo "::error::BACKTEST_CRON_SECRET repo secret is not set"
+            exit 1
+          fi
+          code=$(curl -sS -o /tmp/resp.json -w "%{http_code}" \
+            -X POST "https://tradesure.d2infinite.com/api/cron/tick?queue_limit=100&bt_limit=300" \
+            -H "x-cron-secret: ${{ secrets.BACKTEST_CRON_SECRET }}")
+          echo "HTTP $code"
+          cat /tmp/resp.json
+          echo ""
+          if [ "$code" != "200" ]; then
+            echo "::error::cron tick returned HTTP $code"
+            exit 1
+          fi
