@@ -38,7 +38,16 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     <html
       lang="en"
       className={`${inter.variable} ${jetbrains.variable} ${plexThai.variable}`}
+      suppressHydrationWarning
     >
+      <head>
+        {/* Apply saved theme before first paint to avoid a flash. Default dark. */}
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `(function(){try{var t=localStorage.getItem('theme');if(t==='light'){document.documentElement.setAttribute('data-theme','light');}}catch(e){}})();`,
+          }}
+        />
+      </head>
       <body className="min-h-screen bg-bg-base text-ink-primary antialiased flex flex-col font-sans">
         <div className="flex-1">{children}</div>
         <footer className="mt-12 border-t border-white/5 bg-black/30 py-4">

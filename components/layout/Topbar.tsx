@@ -3,6 +3,7 @@
 import Icon from "@/components/ui/Icon";
 import MobileNav from "./MobileNav";
 import NotificationsBell from "./NotificationsBell";
+import ThemeToggle from "./ThemeToggle";
 
 export default function Topbar({
   username,
@@ -45,6 +46,8 @@ export default function Topbar({
           <span className="pulse-dot" />
           Live · Binance
         </div>
+
+        <ThemeToggle />
 
         <NotificationsBell />
 

@@ -31,6 +31,52 @@
   --violet: #b87cff;
 }
 
+/* ─── Light theme ──────────────────────────────────────────────────────────
+   Activated by data-theme="light" on <html>. Components read var() tokens so
+   most adapt automatically; we also tweak the few hardcoded dark-on-light
+   spots (body gradient, grid lines, card shadow). */
+:root[data-theme="light"] {
+  --bg-base: #f5f7fb;
+  --bg-deep: #eceff5;
+  --surface-1: #ffffff;
+  --surface-2: #f2f5f9;
+  --surface-3: #e7ecf2;
+  --surface-glass: rgba(255, 255, 255, 0.72);
+  --border: rgba(15, 23, 42, 0.08);
+  --border-strong: rgba(15, 23, 42, 0.14);
+  --text-primary: #14233a;
+  --text-secondary: #475569;
+  --text-muted: #64748b;
+  --text-faint: #94a3b8;
+  --accent: #00b894;
+  --accent-hi: #00d4aa;
+  --accent-lo: #009b7d;
+  --buy: #00a888;
+  --sell: #e6395a;
+  --warn: #c2710a;
+  --info: #2f6fe0;
+  --violet: #9d5cf0;
+}
+
+:root[data-theme="light"] body {
+  background-image:
+    radial-gradient(1200px 800px at 80% -10%, rgba(0, 184, 148, 0.05), transparent 60%),
+    radial-gradient(900px 700px at -10% 110%, rgba(91, 162, 255, 0.05), transparent 60%);
+}
+
+:root[data-theme="light"] .bg-grid {
+  background-image:
+    linear-gradient(rgba(15, 23, 42, 0.04) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(15, 23, 42, 0.04) 1px, transparent 1px);
+}
+
+:root[data-theme="light"] .card {
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.6), 0 1px 2px rgba(15, 23, 42, 0.04), 0 10px 28px rgba(15, 23, 42, 0.07);
+}
+
+/* Smooth the swap */
+html { transition: background-color 0.2s ease, color 0.2s ease; }
+
 html, body {
   background: var(--bg-base);
   color: var(--text-primary);
