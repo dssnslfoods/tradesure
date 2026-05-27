@@ -80,14 +80,18 @@ export default function SignalsTable({
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [page, setPage] = useState(0);
 
-  // Plans actually present in the data — treat NULL signal_type as "swing"
-  // (legacy rows). Only show the plan chip row if we see more than one plan,
-  // mirroring the symbol-filter behavior.
+  // Plans to show as filter chips: every plan in the catalog (so the row is
+  // complete even when a plan has no recent signals), plus any data-only
+  // plan keys not in the catalog (legacy). Ordered by catalog order.
   const uniquePlans = useMemo(() => {
-    const set = new Set<string>();
-    for (const r of rows) set.add(r.signal_type ?? "swing");
-    return Array.from(set).sort();
-  }, [rows]);
+    const dataPlans = new Set<string>();
+    for (const r of rows) dataPlans.add(r.signal_type ?? "swing");
+    const catalogOrder = plansCatalog.map((p) => p.key);
+    const extra = Array.from(dataPlans)
+      .filter((k) => !catalogOrder.includes(k))
+      .sort();
+    return [...catalogOrder, ...extra];
+  }, [rows, plansCatalog]);
 
   // Unique symbols across all rows — sorted alphabetically so the filter is
   // stable as new symbols come in. We only render the symbol selector when

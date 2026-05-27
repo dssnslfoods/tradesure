@@ -105,12 +105,19 @@ export default function ConfidenceStatsTable({ rows, plansCatalog }: ConfidenceS
   // Build plan list — only plans that have at least 1 decided trade
   const stats = bucketize(rows);
   const plansSeen = new Set<string>();
+  // Track every plan that appears in the data (any outcome), and also any
+  // plan defined in the catalog — so the table shows a column for each plan
+  // even before it has closed trades. Order by catalog order, then any
+  // extra (legacy / not-in-catalog) keys appended.
   stats.forEach((inner) => {
-    inner.forEach((cell, plan) => {
-      if (cell.wins + cell.losses > 0) plansSeen.add(plan);
-    });
+    inner.forEach((_cell, plan) => plansSeen.add(plan));
   });
-  const planList = Array.from(plansSeen).sort();
+  rows.forEach((r) => plansSeen.add(r.signal_type ?? "swing"));
+  const catalogOrder = plansCatalog.map((p) => p.key);
+  const planList = [
+    ...catalogOrder.filter((k) => plansCatalog.length > 0),
+    ...Array.from(plansSeen).filter((k) => !catalogOrder.includes(k)).sort(),
+  ];
 
   // Overall row (all plans combined per bucket)
   const overallByBucket = new Map<string, Cell>();
@@ -132,7 +139,10 @@ export default function ConfidenceStatsTable({ rows, plansCatalog }: ConfidenceS
   });
   const grandTotal = aggregate(Array.from(planTotals.values()));
 
-  const hasData = planList.length > 0;
+  // "Has data" = at least one decided trade somewhere. The table still
+  // renders all plan columns even at 0 decided, but we show the empty-state
+  // hint when nothing has resolved yet.
+  const hasData = grandTotal.wins + grandTotal.losses > 0;
 
   return (
     <div className="card mb-5 overflow-hidden p-0">
