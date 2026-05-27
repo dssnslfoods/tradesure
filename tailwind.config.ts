@@ -5,39 +5,41 @@ const config: Config = {
   theme: {
     extend: {
       colors: {
+        // All theme-sensitive tokens point at CSS variables (defined in
+        // app/globals.css) so they adapt to light/dark automatically.
         bg: {
-          base: "#07090d",
-          deep: "#050709",
+          base: "var(--bg-base)",
+          deep: "var(--bg-deep)",
         },
         surface: {
-          1: "#0d1117",
-          2: "#131922",
-          3: "#1a212d",
+          1: "var(--surface-1)",
+          2: "var(--surface-2)",
+          3: "var(--surface-3)",
         },
         ink: {
-          primary: "#e7ecf2",
-          secondary: "#9aa4b2",
-          muted: "#5b6573",
-          faint: "#3a4250",
+          primary: "var(--text-primary)",
+          secondary: "var(--text-secondary)",
+          muted: "var(--text-muted)",
+          faint: "var(--text-faint)",
         },
         brand: {
-          DEFAULT: "#00d4aa",
-          hi: "#2af0c5",
-          lo: "#00b894",
+          DEFAULT: "var(--accent)",
+          hi: "var(--accent-hi)",
+          lo: "var(--accent-lo)",
         },
         sig: {
-          buy: "#00d4aa",
-          sell: "#ff5577",
-          warn: "#ffb547",
-          info: "#5aa2ff",
-          violet: "#b87cff",
+          buy: "var(--buy)",
+          sell: "var(--sell)",
+          warn: "var(--warn)",
+          info: "var(--info)",
+          violet: "var(--violet)",
         },
         // Legacy aliases — keep old code working until full migration
         crypto: {
-          bg: "#07090d",
-          panel: "#0d1117",
-          border: "rgba(255,255,255,0.08)",
-          accent: "#00d4aa",
+          bg: "var(--bg-base)",
+          panel: "var(--surface-1)",
+          border: "var(--border)",
+          accent: "var(--accent)",
         },
       },
       fontFamily: {
